@@ -1,0 +1,11 @@
+menu "Atem Communication"
+
+  config ATEM_PACKET_BUFFER_SIZE
+    int "The size of package buffer"
+    default 128
+
+  config ATEM_RECEIVE_BUFFER_SIZE
+    int "The size of udp receive buffer"
+    default 2048
+  
+endmenu
