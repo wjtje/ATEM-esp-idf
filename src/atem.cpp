@@ -17,14 +17,34 @@ AtemCommunication::AtemCommunication() {
   atem_addr_.sin_port = htons(this->config_->get_port());
   atem_addr_.sin_addr.s_addr = this->config_->get_ip();
 
+  // Register events
+  REGISTER_EVENT_HANDLER(AtemCommunication, EthDisconnected, ETH_EVENT,
+                         ETHERNET_EVENT_DISCONNECTED, void *);
+  REGISTER_EVENT_HANDLER(AtemCommunication, EthConnected, IP_EVENT,
+                         IP_EVENT_ETH_GOT_IP, void *);
+}
+
+void AtemCommunication::EthConnected(int32_t id, void *data) {
   CREATE_TASK(AtemCommunication, thread_, "atem_comm", 4096, tskIDLE_PRIORITY,
-              NULL);
+              &this->thread_handle_);
+}
+
+void AtemCommunication::EthDisconnected(int32_t id, void *data) {
+  if (this->thread_handle_ != nullptr) vTaskDelete(this->thread_handle_);
+
+  if (this->sock_ != -1) {
+    WCAF_LOG_WARNING("Closing socket");
+    xSemaphoreGive(this->send_mutex_);
+    lwip_shutdown(this->sock_, 0);
+    close(this->sock_);
+  }
 }
 
 void AtemCommunication::thread_() {
   while (1) {
     // Reset variables
     this->last_local_id_ = 0;
+    this->last_remote_id_ = 0;
     this->init_send_ = false;
     this->connected_ = false;
     this->session_id_ = 0x5FFF;
@@ -75,10 +95,10 @@ void AtemCommunication::thread_() {
                         11);
       uint16_t length =
           (this->recv_buffer_[0] << 8 | this->recv_buffer_[1]) & 0x07FF;
-
-      this->session_id_ = this->recv_buffer_[2] << 8 | this->recv_buffer_[3];
       this->last_remote_id_ =
           this->recv_buffer_[10] << 8 | this->recv_buffer_[11];
+
+      this->session_id_ = this->recv_buffer_[2] << 8 | this->recv_buffer_[3];
       this->last_packet_ = esp_timer_get_time();
 
       // Respond to HELLO
@@ -131,7 +151,7 @@ void AtemCommunication::thread_() {
   }
 
   // We should never reach this code, but just to be sure
-  WCAF_LOG_ERROR("ATEM thead has quit!");
+  WCAF_LOG_ERROR("ATEM thread has quit!");
   vTaskDelete(NULL);
 }
 
@@ -183,6 +203,25 @@ esp_err_t AtemCommunication::SendMessage_(uint16_t length) {
   }
 
   return ESP_OK;
+}
+
+esp_err_t AtemCommunication::SendCommand_(const char *command,
+                                          const uint16_t length,
+                                          const uint8_t *data) {
+  // Init message (Packet header [12] + Command header [8])
+  auto err = this->InitMessage_(CommandType::ACK_REQUEST, 20 + length);
+  if (err != ESP_OK) return err;
+
+  // Create command header
+  this->send_buffer_[12] = HIGH_BYTE(8 + length);
+  this->send_buffer_[13] = LOW_BYTE(8 + length);
+  memcpy(this->send_buffer_ + 16, command, 4);
+
+  // Copy command data
+  memcpy(this->send_buffer_ + 20, data, length);
+
+  // Send message
+  return this->SendMessage_(20 + length);
 }
 
 esp_err_t AtemCommunication::Config::from_json(cJSON *json) {

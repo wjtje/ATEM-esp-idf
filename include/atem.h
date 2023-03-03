@@ -1,9 +1,12 @@
 #pragma once
+#include <esp_eth.h>
 #include <esp_event.h>
 #include <esp_netif.h>
 #include <esp_timer.h>
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
+
+#include <list>
 
 #include "config_helpers.h"
 #include "config_manager.h"
@@ -27,8 +30,16 @@ class AtemCommunication {
   DEFINE_SINGLETON(AtemCommunication);
 
  public:
-  // Check weather of not the ATEM is connected
-  bool is_connected() { return this->connected_; }
+  /**
+   * @brief Returns whether a ATEM is connected.
+   *
+   * @return true: An ATEM is connceted.
+   * @return false: No ATEM is connected.
+   */
+  bool IsConnected() { return this->connected_; }
+
+  esp_err_t SetPreviewInput(uint16_t videoSource, uint8_t ME = 0);
+  esp_err_t Cut(uint8_t ME = 0);
 
  protected:
   class Config : public config_manager::Config {
@@ -63,7 +74,7 @@ class AtemCommunication {
   uint16_t cmd_index_;
   uint16_t cmd_length_;
 
-  // State
+  // Communication state
   bool init_send_;
   bool connected_;
   int64_t last_packet_;      // Last time the ATEM has send a packet to us
@@ -73,7 +84,11 @@ class AtemCommunication {
 
   AtemCommunication();
 
+  TaskHandle_t thread_handle_;
   void thread_();
+
+  void EthConnected(int32_t id, void *data);
+  void EthDisconnected(int32_t id, void *data);
 
   /**
    * @brief Clears the buffer and creates the header
@@ -95,6 +110,17 @@ class AtemCommunication {
    * @return esp_err_t
    */
   esp_err_t SendMessage_(uint16_t length);
+
+  /**
+   * @brief Send a command to the ATEM
+   *
+   * @param command Four bytes indicate the command
+   * @param length The length of the data
+   * @param data The actual data to send
+   * @return esp_err_t
+   */
+  esp_err_t SendCommand_(const char *command, const uint16_t length,
+                         const uint8_t *data);
 
   /**
    * @brief Parse a UDP packet received from the ATEM into individual commands
