@@ -12,40 +12,43 @@ AtemCommunication::AtemCommunication() {
 
   this->send_mutex_ = xSemaphoreCreateMutex();
 
+  // Get instances of needed objects
+  this->comm_ = uart_communication::UartCommunication::GetInstance();
+
   // Define the atem adress and ip
   atem_addr_.sin_family = AF_INET;
   atem_addr_.sin_port = htons(this->config_->get_port());
   atem_addr_.sin_addr.s_addr = this->config_->get_ip();
 
   // Register events
-  REGISTER_EVENT_HANDLER(AtemCommunication, EthDisconnected, ETH_EVENT,
+  REGISTER_EVENT_HANDLER(AtemCommunication, EthDisconnectedEvent_, ETH_EVENT,
                          ETHERNET_EVENT_DISCONNECTED, void *);
-  REGISTER_EVENT_HANDLER(AtemCommunication, EthConnected, IP_EVENT,
+  REGISTER_EVENT_HANDLER(AtemCommunication, EthConnectedEvent_, IP_EVENT,
                          IP_EVENT_ETH_GOT_IP, void *);
-}
 
-void AtemCommunication::EthConnected(int32_t id, void *data) {
+  //  Start thread
   CREATE_TASK(AtemCommunication, thread_, "atem_comm", 4096, tskIDLE_PRIORITY,
               &this->thread_handle_);
 }
 
-void AtemCommunication::EthDisconnected(int32_t id, void *data) {
-  if (this->thread_handle_ != nullptr) vTaskDelete(this->thread_handle_);
+void AtemCommunication::EthConnectedEvent_(int32_t id, void *data) {
+  if (this->thread_handle_ == nullptr)
+    CREATE_TASK(AtemCommunication, thread_, "atem_comm", 4096, tskIDLE_PRIORITY,
+                &this->thread_handle_);
+}
 
-  if (this->sock_ != -1) {
-    WCAF_LOG_WARNING("Closing socket");
-    xSemaphoreGive(this->send_mutex_);
-    lwip_shutdown(this->sock_, 0);
-    close(this->sock_);
-  }
+void AtemCommunication::EthDisconnectedEvent_(int32_t id, void *data) {
+  if (this->thread_handle_ != nullptr) vTaskDelete(this->thread_handle_);
+  this->CloseSocket_();
 }
 
 void AtemCommunication::thread_() {
   while (1) {
     // Reset variables
-    this->last_local_id_ = 0;
-    this->last_remote_id_ = 0;
-    this->init_send_ = false;
+    this->client_pkt_id = 0;
+    this->switcher_pkt_id_ = 0;
+    this->init_pkt_id_ = 0;
+    this->init_ = false;
     this->connected_ = false;
     this->session_id_ = 0x5FFF;
     this->last_packet_ = esp_timer_get_time();
@@ -70,7 +73,6 @@ void AtemCommunication::thread_() {
 
     // Send hello packet
     this->InitMessage_(CommandType::HELLO, 20);
-    this->send_buffer_[9] = 0x3A;
     this->send_buffer_[12] = 0x01;
     this->SendMessage_(20);
 
@@ -79,8 +81,11 @@ void AtemCommunication::thread_() {
       // Receive data
       sockaddr_storage source_addr;
       socklen_t socklen = sizeof(source_addr);
-      lwip_recvfrom(this->sock_, this->recv_buffer_, sizeof(this->recv_buffer_),
-                    0, (sockaddr *)&source_addr, &socklen);
+      ssize_t len = lwip_recvfrom(this->sock_, this->recv_buffer_,
+                                  sizeof(this->recv_buffer_), 0,
+                                  (sockaddr *)&source_addr, &socklen);
+
+      if (len < 1) continue;
 
       // Check ip
       if (((sockaddr_in *)&source_addr)->sin_addr.s_addr !=
@@ -89,39 +94,41 @@ void AtemCommunication::thread_() {
         continue;
       }
 
-      // Parse data
-      CommandType cmd =
-          (CommandType)((this->recv_buffer_[0] << 8 | this->recv_buffer_[1]) >>
-                        11);
-      uint16_t length =
-          (this->recv_buffer_[0] << 8 | this->recv_buffer_[1]) & 0x07FF;
-      this->last_remote_id_ =
-          this->recv_buffer_[10] << 8 | this->recv_buffer_[11];
+      // Extract header data
+      Header header = this->ExtractHeader_();
+      WCAF_LOG_DEFAULT("Received: id: %u cmd: %02X len: %u",
+                       header.switcher_pkt_id, header.cmd, header.length);
 
-      this->session_id_ = this->recv_buffer_[2] << 8 | this->recv_buffer_[3];
+      // Check pkt len
+      if (header.length != len) WCAF_LOG_WARNING("Package length mismatch");
+
+      // Update local variables
+      this->session_id_ = header.session_id;
       this->last_packet_ = esp_timer_get_time();
+      this->switcher_pkt_id_ = header.switcher_pkt_id;
+
+      // Check for duplicate init pkt
+      if (this->switcher_pkt_id_ < 32 && !this->init_) {
+        if (this->init_pkt_id_ & (0x01 << this->switcher_pkt_id_))
+          continue;
+        else
+          this->init_pkt_id_ |= (0x01 << this->switcher_pkt_id_);
+      }
 
       // Respond to HELLO
-      if (cmd & CommandType::HELLO) {
+      if (header.cmd & CommandType::HELLO) {
         this->connected_ = true;
 
         this->InitMessage_(CommandType::ACK, 12);
-        this->send_buffer_[9] = 0x03;
         this->SendMessage_(12);
       }
 
-      // Check init payload
-      if (!this->init_send_ && length == 12 && this->last_remote_id_ > 1) {
-        this->init_send_ = true;
-        WCAF_LOG_DEFAULT("Init payload at %d", this->last_remote_id_);
-      }
-
-      if (this->init_send_ && cmd & CommandType::ACK_REQUEST &&
-          !(cmd & CommandType::RESEND)) {
-        // Respond to ACK
-        this->InitMessage_(CommandType::ACK, 12, this->last_remote_id_);
+      // Respond to ACK REQUEST but check that it's not a RESEND
+      if (this->init_ && header.cmd & CommandType::ACK_REQUEST &&
+          !(header.cmd & CommandType::RESEND)) {
+        this->InitMessage_(CommandType::ACK, 12, this->switcher_pkt_id_);
         this->SendMessage_(12);
-      } else if (this->init_send_ && cmd & CommandType::REQUEST) {
+      } else if (this->init_ && header.cmd & CommandType::REQUEST) {
         // Respond to REQUEST, we cann't actually respond because we don't have
         // a buffer of past messages
         WCAF_LOG_WARNING(
@@ -134,20 +141,13 @@ void AtemCommunication::thread_() {
       }
 
       // Parse packet
-      if (!(cmd & CommandType::HELLO) && length > 12) {
-        WCAF_LOG_DEFAULT("Received a packet (%i) with %i bytes",
-                         this->last_remote_id_, length);
-        this->ParsePacket_(length);
+      if (!(header.cmd & CommandType::HELLO) && header.length > 12) {
+        this->ParsePacket_(header.length);
       }
     }
 
     // Delete socket if communication is closed
-    if (this->sock_ != -1) {
-      WCAF_LOG_WARNING("Restarting socket");
-      xSemaphoreGive(this->send_mutex_);
-      lwip_shutdown(this->sock_, 0);
-      close(this->sock_);
-    }
+    this->CloseSocket_();
   }
 
   // We should never reach this code, but just to be sure
@@ -157,7 +157,7 @@ void AtemCommunication::thread_() {
 
 esp_err_t AtemCommunication::InitMessage_(const CommandType cmd,
                                           const uint16_t length,
-                                          const uint16_t remote_packet_id,
+                                          const uint16_t switcher_pkt_id,
                                           bool increment_counter) {
   // Take the mutex
   if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS) == pdFALSE) {
@@ -173,15 +173,15 @@ esp_err_t AtemCommunication::InitMessage_(const CommandType cmd,
   this->send_buffer_[1] = LOW_BYTE(length);
   this->send_buffer_[2] = HIGH_BYTE(this->session_id_);
   this->send_buffer_[3] = LOW_BYTE(this->session_id_);
-  this->send_buffer_[4] = HIGH_BYTE(remote_packet_id);
-  this->send_buffer_[5] = LOW_BYTE(remote_packet_id);
+  this->send_buffer_[4] = HIGH_BYTE(switcher_pkt_id);
+  this->send_buffer_[5] = LOW_BYTE(switcher_pkt_id);
 
   // Increase local packet id count
   if (!(cmd & (CommandType::HELLO | CommandType::ACK | CommandType::REQUEST)) &&
       increment_counter) {
-    this->last_local_id_++;
-    this->send_buffer_[10] = HIGH_BYTE(this->last_local_id_);
-    this->send_buffer_[11] = LOW_BYTE(this->last_local_id_);
+    this->client_pkt_id++;
+    this->send_buffer_[10] = HIGH_BYTE(this->client_pkt_id);
+    this->send_buffer_[11] = LOW_BYTE(this->client_pkt_id);
   }
 
   return ESP_OK;
@@ -249,6 +249,25 @@ void AtemCommunication::ParsePacket_(uint16_t packet_length) {
 
     i += this->cmd_length_;
   }
+}
+
+Header AtemCommunication::ExtractHeader_() {
+  return (Header){
+      .cmd =
+          (CommandType)((this->recv_buffer_[0] << 8 | this->recv_buffer_[1]) >>
+                        11),
+      .length =
+          (uint16_t)((this->recv_buffer_[0] << 8 | this->recv_buffer_[1]) &
+                     0x07FF),
+      .session_id =
+          (uint16_t)(this->recv_buffer_[2] << 8 | this->recv_buffer_[3]),
+      .ack_pkt_id =
+          (uint16_t)(this->recv_buffer_[4] << 8 | this->recv_buffer_[5]),
+      .client_pkt_id =
+          (uint16_t)(this->recv_buffer_[8] << 8 | this->recv_buffer_[9]),
+      .switcher_pkt_id =
+          (uint16_t)(this->recv_buffer_[10] << 8 | this->recv_buffer_[11]),
+  };
 }
 
 }  // namespace atem

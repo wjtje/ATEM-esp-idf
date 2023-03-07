@@ -25,6 +25,12 @@ void AtemCommunication::ParseCommand_(const char *cmd, ssize_t i) {
     WCAF_LOG_WARNING("ATEM: %s", this->recv_buffer_ + i);
   }
 
+  // Initialization Completed
+  if (!strcmp(cmd, "InCm")) {
+    WCAF_LOG_INFO("Initialization Completed! at %u", this->switcher_pkt_id_);
+    this->init_ = true;
+  }
+
   // Program Input
   if (!strcmp(cmd, "PrgI")) {
     ProgramInput msg_ = {
@@ -42,6 +48,7 @@ void AtemCommunication::ParseCommand_(const char *cmd, ssize_t i) {
         .ME = this->recv_buffer_[i],
         .source = (uint16_t)(this->recv_buffer_[i + 2] << 8 |
                              this->recv_buffer_[i + 3]),
+        .visable = (bool)(this->recv_buffer_[i + 4] & 0x01),
     };
     esp_event_post(ATEM_EVENT, ATEM_CMD("PrvI"), &msg_, sizeof(PreviewInput),
                    TTW);

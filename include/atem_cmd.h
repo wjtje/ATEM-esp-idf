@@ -18,6 +18,7 @@ struct ProgramInput {
 struct PreviewInput {
   uint8_t ME;
   uint16_t source;
+  bool visable;
 };
 
 }  // namespace atem
