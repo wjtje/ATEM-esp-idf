@@ -8,6 +8,7 @@
 
 #include <list>
 
+#include "atem_cmd.h"
 #include "communication_struct.h"
 #include "config_helpers.h"
 #include "config_manager.h"
@@ -49,8 +50,33 @@ class AtemCommunication {
    */
   bool IsConnected() { return this->connected_; }
 
+  /**
+   * @brief Closes the ATEM socket and deletes the thread.
+   *
+   */
+  void Stop() {
+    this->last_packet_ = 0;
+    this->CloseSocket_();
+    vTaskDelete(this->thread_handle_);
+  }
+
+  InputProperty *GetInputProperty(Source source) {
+    for (auto inpr : this->input_properties_)
+      if (inpr->source == source) return inpr;
+    return nullptr;
+  }
+  std::list<InputProperty *> *GetInputProperties() {
+    return &this->input_properties_;
+  }
+  char *GetProductId() { return this->product_id_; }
+  ProtocolVerion GetProtocolVersion() { return this->protocol_version_; }
+
   esp_err_t SetPreviewInput(uint16_t videoSource, uint8_t ME = 0);
+  esp_err_t SetAuxInput(uint16_t videoSource, uint8_t channel = 0,
+                        bool active = true);
+
   esp_err_t Cut(uint8_t ME = 0);
+  esp_err_t Auto(uint8_t ME = 0);
 
  protected:
   class Config : public config_manager::Config {
@@ -95,6 +121,11 @@ class AtemCommunication {
   uint16_t switcher_pkt_id_;  // Last remote packet id received from the ATEM
   uint16_t session_id_;       // A uniqe session id received from the ATEM
 
+  // ATEM Infomation
+  std::list<InputProperty *> input_properties_;
+  char *product_id_{nullptr};
+  ProtocolVerion protocol_version_;
+
   AtemCommunication();
 
   TaskHandle_t thread_handle_;
@@ -105,7 +136,6 @@ class AtemCommunication {
   void CloseSocket_() {
     if (this->sock_ != -1) {
       WCAF_LOG_DEFAULT("Closing socket");
-      xSemaphoreGive(this->send_mutex_);
       lwip_shutdown(this->sock_, 0);
       lwip_close(this->sock_);
     }

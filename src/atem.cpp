@@ -32,14 +32,13 @@ AtemCommunication::AtemCommunication() {
 }
 
 void AtemCommunication::EthConnectedEvent_(int32_t id, void *data) {
-  if (this->thread_handle_ == nullptr)
+  if (xTaskGetHandle("atem_comm") == nullptr)
     CREATE_TASK(AtemCommunication, thread_, "atem_comm", 4096, tskIDLE_PRIORITY,
                 &this->thread_handle_);
 }
 
 void AtemCommunication::EthDisconnectedEvent_(int32_t id, void *data) {
-  if (this->thread_handle_ != nullptr) vTaskDelete(this->thread_handle_);
-  this->CloseSocket_();
+  this->last_packet_ = 0;
 }
 
 void AtemCommunication::thread_() {
@@ -108,7 +107,7 @@ void AtemCommunication::thread_() {
       this->switcher_pkt_id_ = header.switcher_pkt_id;
 
       // Check for duplicate init pkt
-      if (this->switcher_pkt_id_ < 32 && !this->init_) {
+      if (this->switcher_pkt_id_ < 32) {
         if (this->init_pkt_id_ & (0x01 << this->switcher_pkt_id_))
           continue;
         else
@@ -147,7 +146,9 @@ void AtemCommunication::thread_() {
     }
 
     // Delete socket if communication is closed
+    xSemaphoreGive(this->send_mutex_);
     this->CloseSocket_();
+    if (this->last_packet_ == 0) vTaskDelete(NULL);
   }
 
   // We should never reach this code, but just to be sure
