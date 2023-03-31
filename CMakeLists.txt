@@ -1,5 +1,5 @@
 idf_component_register(
-  SRCS "src/atem.cpp" "src/atem_cmd.cpp"
+  SRCS "src/atem.cpp"
   INCLUDE_DIRS "include"
-  REQUIRES "helpers" "esp_event" "esp_eth" "esp_timer" "wcaf_log" "lwip" "config_manager" "esp_netif" "uart_communication"
+  REQUIRES "esp_event" "esp_timer" "lwip" "log" "helpers" "config_manager"
 )

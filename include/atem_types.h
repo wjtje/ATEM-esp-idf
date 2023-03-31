@@ -139,4 +139,10 @@ struct TransitionPosition {
   uint16_t position;
 };
 
+struct Topology {
+  uint8_t num_me;
+  uint8_t num_sources;
+  uint8_t num_aux;
+};
+
 }  // namespace atem

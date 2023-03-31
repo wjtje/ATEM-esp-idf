@@ -1,274 +1,439 @@
 #include "atem.h"
 
+#include <freertos/task.h>
+
 namespace atem {
 
 CREATE_SINGLETON(AtemCommunication);
 ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
-const char *AtemCommunication::TAG{"AtemCommunication"};
+const char *TAG{"ATEM"};
+
+ProtocolHeader::ProtocolHeader(CommandFlags flags, uint16_t length,
+                               uint16_t session, uint16_t id) {
+  if (length > 2047 || length < 12) ESP_LOGW(TAG, "Length to small or large");
+  this->data_ = (uint8_t *)malloc(12);
+  memset(this->data_ + 4, 0x0, 8);
+
+  // Place the flags and length at the right place
+  this->data_[0] = ((uint8_t)flags << 3) | HIGH_BYTE(length);
+  this->data_[1] = LOW_BYTE(length);
+  // Place the session at the right place
+  this->data_[2] = HIGH_BYTE(session);
+  this->data_[3] = LOW_BYTE(session);
+
+  this->SetId(id);
+}
+
+ProtocolHeader::ProtocolHeader(const uint8_t *data) {
+  this->data_ = (uint8_t *)malloc(12);
+  memcpy(this->data_, data, 12);
+}
+
+ProtocolHeader::~ProtocolHeader() { free(this->data_); }
 
 AtemCommunication::AtemCommunication() {
   this->config_ = new Config();
   config_manager::ConfigManager::GetInstance()->restore(this->config_);
 
-  this->send_mutex_ = xSemaphoreCreateMutex();
+  pbuf_init();
 
-  // Get instances of needed objects
-  this->comm_ = uart_communication::UartCommunication::GetInstance();
+  // Allocate udp
+  this->pcb_ = udp_new();
+  if (this->pcb_ == nullptr) ESP_LOGE(TAG, "Failed to alloc new udp");
 
-  // Define the atem adress and ip
-  atem_addr_.sin_family = AF_INET;
-  atem_addr_.sin_port = htons(this->config_->get_port());
-  atem_addr_.sin_addr.s_addr = this->config_->get_ip();
+  // Setup callback
+  udp_recv(
+      this->pcb_,
+      [](void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr,
+         u16_t port) {
+        ((AtemCommunication *)arg)->ReceivePacket_(p, addr, port);
+      },
+      this);
 
-  // Register events
-  REGISTER_EVENT_HANDLER(AtemCommunication, EthDisconnectedEvent_, ETH_EVENT,
-                         ETHERNET_EVENT_DISCONNECTED, void *);
-  REGISTER_EVENT_HANDLER(AtemCommunication, EthConnectedEvent_, IP_EVENT,
-                         IP_EVENT_ETH_GOT_IP, void *);
+  // Start background thread
+  xTaskCreate([](void *arg) { ((AtemCommunication *)arg)->ThreadInterval_(); },
+              "atem_int", 4096, this, tskIDLE_PRIORITY + 5,
+              &this->thread_interval_);
 
-  //  Start thread
-  CREATE_TASK(AtemCommunication, thread_, "atem_comm", 4096, tskIDLE_PRIORITY,
-              &this->thread_handle_);
+  this->parser_queue_ = xQueueCreate(6, sizeof(pbuf *));
+  if (this->parser_queue_ == NULL) ESP_LOGE(TAG, "Failed to create queue");
+  xTaskCreate([](void *arg) { ((AtemCommunication *)arg)->ThreadParser_(); },
+              "atem_par", 4096, this, tskIDLE_PRIORITY + 5,
+              &this->thread_parser_);
 }
 
-void AtemCommunication::EthConnectedEvent_(int32_t id, void *data) {
-  if (xTaskGetHandle("atem_comm") == nullptr)
-    CREATE_TASK(AtemCommunication, thread_, "atem_comm", 4096, tskIDLE_PRIORITY,
-                &this->thread_handle_);
+void AtemCommunication::Stop() {
+  // Stop the threads
+  vTaskDelete(this->thread_interval_);
+  vTaskDelete(this->thread_parser_);
+
+  vQueueDelete(this->parser_queue_);
+
+  // Clear the connection
+  this->ResetConnection_();
+  // Remove the connection
+  udp_remove(this->pcb_);
 }
 
-void AtemCommunication::EthDisconnectedEvent_(int32_t id, void *data) {
-  this->last_packet_ = 0;
+pbuf *AtemCommunication::CreatePacket_(ProtocolHeader *header, bool clean) {
+  auto p = pbuf_alloc(PBUF_TRANSPORT, header->GetLength(), PBUF_RAM);
+  if (p == nullptr) ESP_LOGE(TAG, "Failed to alloc packet buffer");
+
+  // Initialze data
+  ESP_ERROR_CHECK(pbuf_take_at(p, header->GetData(), 12, 0));
+  if (clean)
+    for (uint16_t i = 12; i < header->GetLength(); i++) pbuf_put_at(p, i, 0x00);
+
+  delete header;
+  return p;
 }
 
-void AtemCommunication::thread_() {
-  while (1) {
-    // Reset variables
-    this->client_pkt_id = 0;
-    this->switcher_pkt_id_ = 0;
-    this->init_pkt_id_ = 0;
-    this->init_ = false;
-    this->connected_ = false;
-    this->session_id_ = 0x5FFF;
-    this->last_packet_ = esp_timer_get_time();
+void AtemCommunication::SendPacket_(pbuf *p) {
+  auto err = udp_send(this->pcb_, p);
+  if (err != ESP_OK) ESP_LOGE(TAG, "Failed to send packet (%u)", err);
+  pbuf_free(p);
+}
 
-    // Create socket
-    this->sock_ = lwip_socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (this->sock_ < 0) {
-      WCAF_LOG_ERROR("Failed to create socket (%d)", errno);
-      break;
+void AtemCommunication::SendCommand_(const char *command, const uint16_t length,
+                                     const uint8_t *data) {
+  auto p = this->CreatePacket_(new ProtocolHeader(
+      ProtocolHeader::ACK, 20 + length, this->session_, ++this->local_id_));
+
+  uint8_t cmd_header[] = {HIGH_BYTE(8 + length), LOW_BYTE(8 + length), 0, 0};
+  pbuf_take_at(p, cmd_header, sizeof(cmd_header), 12);
+  pbuf_take_at(p, command, 4, 16);
+  pbuf_take_at(p, data, length, 20);
+
+  this->SendPacket_(p);
+}
+
+void AtemCommunication::ReceivePacket_(pbuf *p, const ip_addr_t *addr,
+                                       uint16_t port) {
+  // Check addr and length
+  if (addr->u_addr.ip4.addr != this->config_->get_ip()->u_addr.ip4.addr) {
+    ESP_LOGW(TAG, "Received data from other ip");
+    pbuf_free(p);
+  }
+
+  if (p->len < 12) {
+    ESP_LOGW(TAG, "Received a package that's to small");
+    pbuf_free(p);
+  }
+
+  this->last_communication_ = esp_timer_get_time();
+
+  // Get header information
+  auto header = new ProtocolHeader((uint8_t *)p->payload);
+  this->session_ = header->GetSession();
+  if (header->GetId() != 0) this->remote_id_ = header->GetId();
+
+  // Take note of received init packages
+  if (this->state_ == ConnectionState::INIT && this->remote_id_ < 32)
+    this->init_pkt_ |= 0x01 << this->remote_id_;
+
+  // Received INIT
+  if (header->GetFlags() & ProtocolHeader::INIT) {
+    auto status = pbuf_get_at(p, 12);
+
+    if (status == 2) {
+      ESP_LOGI(TAG, "Received INIT");
+      this->state_ = ConnectionState::INIT;
+
+      // Send back RESPONSE for INIT
+      auto p = new ProtocolHeader(ProtocolHeader::RESPONSE, 12);
+      this->SendPacket_(this->CreatePacket_(p));
+    } else if (status == 3)
+      ESP_LOGW(TAG, "ATEM is full");
+    else if (status == 4)
+      // TODO: Figure out what to do here
+      ESP_LOGW(TAG, "Received reconnect attempt");
+    else
+      ESP_LOGE(TAG, "Received unknown INIT");
+
+    goto cleanup;
+  }
+
+  // Detect when all INIT packages are send
+  if (this->state_ == ConnectionState::INIT &&
+      (header->GetFlags() & ProtocolHeader::ACK)) {
+    ESP_LOGD(TAG, "INIT complete");
+    this->state_ = ConnectionState::ACTIVE;
+    this->init_id_ = this->remote_id_;
+  }
+
+  // Respond to ACK request
+  if (header->GetFlags() & ProtocolHeader::ACK &&
+      this->state_ == ConnectionState::ACTIVE) {
+    ESP_LOGD(TAG, "-> ACK %u", this->remote_id_);
+    auto p = new ProtocolHeader(ProtocolHeader::RESPONSE, 12, this->session_);
+    p->SetAckId(this->remote_id_);
+    this->SendPacket_(this->CreatePacket_(p));
+  }
+
+  // Respond to RESEND request
+  if (header->GetFlags() & ProtocolHeader::RESEND &&
+      this->state_ == ConnectionState::ACTIVE) {
+    ESP_LOGW(TAG, "<- Resend request for %u", header->GetResendId());
+
+    auto p = new ProtocolHeader(ProtocolHeader::ACK, 12, this->session_,
+                                header->GetResendId());
+    this->SendPacket_(this->CreatePacket_(p));
+  }
+
+  // Got ACK for packet
+  if (header->GetAckId() != 0) ESP_LOGD(TAG, "<- ACK %u", header->GetAckId());
+
+  // Send to parser thread using queue
+  if (header->GetLength() > 12) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (xQueueSendFromISR(this->parser_queue_, (void *)(&p),
+                          &xHigherPriorityTaskWoken) != pdTRUE) {
+      ESP_LOGE(TAG, "Failed to add package to queue");
+      pbuf_free(p);
     }
 
-    // Set the socket timeout
-    int64_t timeout_micro =
-        this->config_->get_timeout() *
-        1000000;  // Convert seconds to micro seconds for the esp timer
-    timeval timeout = {
-        .tv_sec = this->config_->get_timeout(),
-        .tv_usec = 0,
-    };
-    this->recv_len_ = lwip_setsockopt(this->sock_, SOL_SOCKET, SO_RCVTIMEO,
-                                      &timeout, sizeof(timeout));
+    delete header;
+    if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
+    return;
+  }
 
-    // Send hello packet
-    this->InitMessage_(CommandType::HELLO, 20);
-    this->send_buffer_[12] = 0x01;
-    this->SendMessage_(20);
+cleanup:
+  delete header;
+  pbuf_free(p);
+}
 
-    // Communication loop
-    while (esp_timer_get_time() - this->last_packet_ < timeout_micro) {
-      // Receive data
-      sockaddr_storage source_addr;
-      socklen_t socklen = sizeof(source_addr);
-      ssize_t len = lwip_recvfrom(this->sock_, this->recv_buffer_,
-                                  sizeof(this->recv_buffer_), 0,
-                                  (sockaddr *)&source_addr, &socklen);
+void AtemCommunication::ThreadInterval_() {
+  for (;;) {
+    auto now = esp_timer_get_time();
 
-      if (len < 1) continue;
+    // Check for connection
+    if (this->state_ == ConnectionState::NOT_CONNECTED) {
+      // Display messsage
+      char ip_str[INET_ADDRSTRLEN];
+      inet_ntop(AF_INET, &(this->config_->get_ip()->u_addr.ip4.addr), ip_str,
+                INET_ADDRSTRLEN);
+      ESP_LOGI(TAG, "Connecting to %s", ip_str);
 
-      // Check ip
-      if (((sockaddr_in *)&source_addr)->sin_addr.s_addr !=
-          this->config_->get_ip()) {
-        WCAF_LOG_WARNING("Received data on socket from other ip");
-        continue;
-      }
+      // Connect
+      ESP_ERROR_CHECK(udp_connect(this->pcb_, this->config_->get_ip(),
+                                  this->config_->get_port()));
 
-      // Extract header data
-      Header header = this->ExtractHeader_();
-      WCAF_LOG_DEFAULT("Received: id: %u cmd: %02X len: %u",
-                       header.switcher_pkt_id, header.cmd, header.length);
+      // Send init
+      auto p =
+          this->CreatePacket_(new ProtocolHeader(ProtocolHeader::INIT, 20));
+      pbuf_put_at(p, 12, 0x01);
+      this->SendPacket_(p);
 
-      // Check pkt len
-      if (header.length != len) WCAF_LOG_WARNING("Package length mismatch");
+      this->state_ = ConnectionState::CONNECTED;
+      this->last_communication_ = esp_timer_get_time();
+    }
 
-      // Update local variables
-      this->session_id_ = header.session_id;
-      this->last_packet_ = esp_timer_get_time();
-      this->switcher_pkt_id_ = header.switcher_pkt_id;
+    // Check for active connection
+    if (this->state_ != ConnectionState::NOT_CONNECTED &&
+        now - this->last_communication_ > 2000000) {
+      ESP_LOGE(TAG,
+               "Didn't receive anything for the last 2 seconds, restarting");
+      this->ResetConnection_();
+    }
 
-      // Check for duplicate init pkt
-      if (this->switcher_pkt_id_ < 32) {
-        if (this->init_pkt_id_ & (0x01 << this->switcher_pkt_id_))
-          continue;
-        else
-          this->init_pkt_id_ |= (0x01 << this->switcher_pkt_id_);
-      }
-
-      // Respond to HELLO
-      if (header.cmd & CommandType::HELLO) {
-        this->connected_ = true;
-
-        this->InitMessage_(CommandType::ACK, 12);
-        this->SendMessage_(12);
-      }
-
-      // Respond to ACK REQUEST but check that it's not a RESEND
-      if (this->init_ && header.cmd & CommandType::ACK_REQUEST &&
-          !(header.cmd & CommandType::RESEND)) {
-        this->InitMessage_(CommandType::ACK, 12, this->switcher_pkt_id_);
-        this->SendMessage_(12);
-      } else if (this->init_ && header.cmd & CommandType::REQUEST) {
-        // Respond to REQUEST, we cann't actually respond because we don't have
-        // a buffer of past messages
-        WCAF_LOG_WARNING(
-            "Atem requested a resend of %d",
-            (uint16_t)((this->recv_buffer_[6] << 8) | this->recv_buffer_[7]));
-        this->InitMessage_(CommandType::ACK_REQUEST, 12, 0, false);
-        this->send_buffer_[10] = this->recv_buffer_[6];
-        this->send_buffer_[11] = this->recv_buffer_[7];
-        this->SendMessage_(12);
-      }
-
-      // Parse packet
-      if (!(header.cmd & CommandType::HELLO) && header.length > 12) {
-        this->ParsePacket_(header.length);
+    // Ask for missing INIT pkg
+    if (this->state_ == ConnectionState::ACTIVE &&
+        this->init_pkt_ != 0xFFFFFFFF) {
+      for (uint8_t i = 1; i < 32; i++) {
+        if (this->init_id_ == i) {
+          this->init_pkt_ = 0xFFFFFFFF;
+          break;
+        }
+        if (!(this->init_pkt_ & (0x01 << i))) {
+          this->init_pkt_ |= 0x01 << i;
+          ESP_LOGW(TAG, "Missing %u", i);
+          auto p = new ProtocolHeader(ProtocolHeader::ACK, 12, this->session_,
+                                      ++this->local_id_);
+          p->SetResendId(i);
+          this->SendPacket_(this->CreatePacket_(p));
+          break;
+        }
       }
     }
 
-    // Delete socket if communication is closed
-    xSemaphoreGive(this->send_mutex_);
-    this->CloseSocket_();
-    if (this->last_packet_ == 0) vTaskDelete(NULL);
-  }
+    // Send keep alive if connection is active
+    if (this->state_ == ConnectionState::ACTIVE) {
+      auto p = new ProtocolHeader(
+          (ProtocolHeader::CommandFlags)(ProtocolHeader::ACK |
+                                         ProtocolHeader::RESPONSE),
+          12, this->session_, ++this->local_id_);
+      p->SetAckId(this->remote_id_);
+      this->SendPacket_(this->CreatePacket_(p));
+    }
 
-  // We should never reach this code, but just to be sure
-  WCAF_LOG_ERROR("ATEM thread has quit!");
-  vTaskDelete(NULL);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+  }
 }
 
-esp_err_t AtemCommunication::InitMessage_(const CommandType cmd,
-                                          const uint16_t length,
-                                          const uint16_t switcher_pkt_id,
-                                          bool increment_counter) {
-  // Take the mutex
-  if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS) == pdFALSE) {
-    WCAF_LOG_ERROR("Failed to take send mutex");
-    return ESP_FAIL;
-  }
+void AtemCommunication::ResetConnection_() {
+  this->state_ = ConnectionState::NOT_CONNECTED;
+  udp_disconnect(this->pcb_);
 
-  // Clear buffer
-  memset(this->send_buffer_, 0x0, length);
+  this->last_communication_ = 0;
+  this->session_ = 0x0B06;
+  this->local_id_ = 0;
+  this->remote_id_ = 0;
 
-  // Create header
-  this->send_buffer_[0] = (cmd << 3) | (HIGH_BYTE(length) & 0x07);
-  this->send_buffer_[1] = LOW_BYTE(length);
-  this->send_buffer_[2] = HIGH_BYTE(this->session_id_);
-  this->send_buffer_[3] = LOW_BYTE(this->session_id_);
-  this->send_buffer_[4] = HIGH_BYTE(switcher_pkt_id);
-  this->send_buffer_[5] = LOW_BYTE(switcher_pkt_id);
+  // Clear allocated memory
+  free(this->prg_inp_);
+  free(this->prv_inp_);
+  free(this->aux_chn_);
 
-  // Increase local packet id count
-  if (!(cmd & (CommandType::HELLO | CommandType::ACK | CommandType::REQUEST)) &&
-      increment_counter) {
-    this->client_pkt_id++;
-    this->send_buffer_[10] = HIGH_BYTE(this->client_pkt_id);
-    this->send_buffer_[11] = LOW_BYTE(this->client_pkt_id);
-  }
-
-  return ESP_OK;
+  // Free pbuf in parser queue
+  pbuf *p;
+  while (xQueueReceive(this->parser_queue_, &p, 1)) pbuf_free(p);
 }
 
-esp_err_t AtemCommunication::SendMessage_(uint16_t length) {
-  // Send to ATEM
-  int err =
-      lwip_sendto(this->sock_, this->send_buffer_, length, 0,
-                  (sockaddr *)&this->atem_addr_, sizeof(this->atem_addr_));
+void AtemCommunication::ThreadParser_() {
+  pbuf *p;
+  for (;;) {
+    if (!xQueueReceive(this->parser_queue_, &p, portMAX_DELAY)) continue;
+    ESP_LOGI(TAG, "Parser: Received message of %u bytes", p->tot_len);
 
-  // Give mutex
-  xSemaphoreGive(this->send_mutex_);
+    uint16_t i = 12;
+    uint16_t cmd_len = 0;
+    char cmd_str[] = {0, 0, 0, 0};
+    while (i < p->tot_len) {
+      // Get information for command header
+      cmd_len = pbuf_get_at(p, i) << 8 | pbuf_get_at(p, i + 1);
+      pbuf_copy_partial(p, cmd_str, sizeof(cmd_str), i + 4);
 
-  // Check for reset
-  if (err < 0) {
-    WCAF_LOG_ERROR("Failed to send message");
-    return ESP_FAIL;
+      // Parse commands
+      // Product Id
+      if (!memcmp(cmd_str, "_pin", 4)) {
+        char str[44];
+        pbuf_copy_partial(p, str, sizeof(str), i + 8);
+        ESP_LOGI(TAG, "Product id: %s", str);
+        goto next;
+      }
+
+      // Topology
+      if (!memcmp(cmd_str, "_top", 4)) {
+        // Save
+        this->top_.num_me = pbuf_get_at(p, i + 8);
+        this->top_.num_sources = pbuf_get_at(p, i + 9);
+        this->top_.num_aux = pbuf_get_at(p, i + 3);
+
+        // Allocate
+        this->prg_inp_ = (Source *)calloc(this->top_.num_me, sizeof(Source));
+        this->prv_inp_ = (Source *)calloc(this->top_.num_me, sizeof(Source));
+        this->aux_chn_ = (Source *)calloc(this->top_.num_aux, sizeof(Source));
+
+        this->alloc_ = true;
+        goto next;
+      }
+
+      // Program Input
+      if (!strcmp(cmd_str, "PrgI")) {
+        ProgramInput msg_ = {
+            .ME = pbuf_get_at(p, i + 8),
+            .source =
+                (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11)),
+        };
+        if (this->alloc_) this->prg_inp_[msg_.ME] = msg_.source;
+        esp_event_post(ATEM_EVENT, ATEM_CMD("PrgI"), &msg_,
+                       sizeof(ProgramInput), TTW);
+        goto next;
+      }
+
+      // Preview Input
+      if (!strcmp(cmd_str, "PrvI")) {
+        PreviewInput msg_ = {
+            .ME = pbuf_get_at(p, i + 8),
+            .source =
+                (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11)),
+            .visable = (bool)(pbuf_get_at(p, i + 4) & 0x01),
+        };
+        if (this->alloc_) this->prv_inp_[msg_.ME] = msg_.source;
+        esp_event_post(ATEM_EVENT, ATEM_CMD("PrvI"), &msg_,
+                       sizeof(PreviewInput), TTW);
+        goto next;
+      }
+
+      // AUX Channel
+      if (!strcmp(cmd_str, "AuxS")) {
+        AuxInput msg_ = {
+            .channel = pbuf_get_at(p, i + 8),
+            .source =
+                (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11)),
+        };
+        if (this->alloc_) this->aux_chn_[msg_.channel] = msg_.source;
+        esp_event_post(ATEM_EVENT, ATEM_CMD("AuxS"), &msg_, sizeof(AuxInput),
+                       TTW);
+        goto next;
+      }
+
+      // Transition Position
+      if (!strcmp(cmd_str, "TrPs")) {
+        TransitionPosition msg_ = {
+            .ME = pbuf_get_at(p, i + 8),
+            .in_transition = (bool)(pbuf_get_at(p, i + 9) & 0x01),
+            .position = (uint16_t)(pbuf_get_at(p, i + 12) << 8 |
+                                   pbuf_get_at(p, i + 13)),
+        };
+        esp_event_post(ATEM_EVENT, ATEM_CMD("TrPs"), &msg_,
+                       sizeof(TransitionPosition), TTW);
+        goto next;
+      }
+
+      // Input Propertie
+      if (!strcmp(cmd_str, "InPr")) {
+        auto inpr = (InputProperty *)malloc(sizeof(InputProperty));
+
+        inpr->source =
+            (Source)(pbuf_get_at(p, i + 8) << 8 | pbuf_get_at(p, i + 9));
+        pbuf_copy_partial(p, inpr->name_long, sizeof(inpr->name_long) - 1,
+                          i + 10);
+        pbuf_copy_partial(p, inpr->name_short, sizeof(inpr->name_short) - 1,
+                          i + 30);
+
+        // TODO: Clean garbage at the end of the string
+
+        this->input_properties_.push_back(inpr);
+      }
+
+    next:
+      i += cmd_len;
+    }
+
+    pbuf_free(p);
   }
-
-  return ESP_OK;
-}
-
-esp_err_t AtemCommunication::SendCommand_(const char *command,
-                                          const uint16_t length,
-                                          const uint8_t *data) {
-  // Init message (Packet header [12] + Command header [8])
-  auto err = this->InitMessage_(CommandType::ACK_REQUEST, 20 + length);
-  if (err != ESP_OK) return err;
-
-  // Create command header
-  this->send_buffer_[12] = HIGH_BYTE(8 + length);
-  this->send_buffer_[13] = LOW_BYTE(8 + length);
-  memcpy(this->send_buffer_ + 16, command, 4);
-
-  // Copy command data
-  memcpy(this->send_buffer_ + 20, data, length);
-
-  // Send message
-  return this->SendMessage_(20 + length);
 }
 
 esp_err_t AtemCommunication::Config::from_json(cJSON *json) {
-  this->ip_ = this->json_parse_ipstr_(json, "ip");
+  this->ip_.type = IPADDR_TYPE_V4;
+  this->ip_.u_addr.ip4.addr = this->json_parse_ipstr_(json, "ip");
 
   CONFIG_PARSE_NUMBER(json, "port", uint16_t, port);
   CONFIG_PARSE_NUMBER(json, "timeout", uint8_t, timeout);
   return ESP_OK;
 }
 
-void AtemCommunication::ParsePacket_(uint16_t packet_length) {
-  uint16_t i = 12;  // Packet index
-
-  while (i < packet_length) {
-    // Parse command header
-    this->cmd_length_ = this->recv_buffer_[i] << 8 | this->recv_buffer_[i + 1];
-    char cmd_str[] = {this->recv_buffer_[i + 4], this->recv_buffer_[i + 5],
-                      this->recv_buffer_[i + 6], this->recv_buffer_[i + 7],
-                      '\0'};
-
-    // WCAF_LOG_DEFAULT("Got command '%s' of %d bytes", cmd_str,
-    //                  this->cmd_length_);
-
-    this->ParseCommand_(cmd_str, i + 8);
-
-    i += this->cmd_length_;
-  }
+void AtemCommunication::SetPreviewInput(Source videoSource, uint8_t ME) {
+  uint8_t data[] = {ME, 0x00, HIGH_BYTE(videoSource), LOW_BYTE(videoSource)};
+  return this->SendCommand_("CPvI", 4, data);
 }
 
-Header AtemCommunication::ExtractHeader_() {
-  return (Header){
-      .cmd =
-          (CommandType)((this->recv_buffer_[0] << 8 | this->recv_buffer_[1]) >>
-                        11),
-      .length =
-          (uint16_t)((this->recv_buffer_[0] << 8 | this->recv_buffer_[1]) &
-                     0x07FF),
-      .session_id =
-          (uint16_t)(this->recv_buffer_[2] << 8 | this->recv_buffer_[3]),
-      .ack_pkt_id =
-          (uint16_t)(this->recv_buffer_[4] << 8 | this->recv_buffer_[5]),
-      .client_pkt_id =
-          (uint16_t)(this->recv_buffer_[8] << 8 | this->recv_buffer_[9]),
-      .switcher_pkt_id =
-          (uint16_t)(this->recv_buffer_[10] << 8 | this->recv_buffer_[11]),
-  };
+void AtemCommunication::SetAuxInput(Source videoSource, uint8_t channel,
+                                    bool active) {
+  uint8_t data[] = {active, channel, HIGH_BYTE((uint16_t)videoSource),
+                    LOW_BYTE((uint16_t)videoSource)};
+  return this->SendCommand_("CAuS", 4, data);
+}
+
+void AtemCommunication::Cut(uint8_t ME) {
+  uint8_t data[] = {ME, 0x00, 0x00, 0x00};
+  return this->SendCommand_("DCut", 4, data);
+}
+
+void AtemCommunication::Auto(uint8_t ME) {
+  uint8_t data[] = {ME, 0x00, 0x00, 0x00};
+  return this->SendCommand_("DAut", 4, data);
 }
 
 }  // namespace atem
