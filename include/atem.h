@@ -6,7 +6,9 @@
 #include <lwip/sockets.h>
 #include <lwip/udp.h>
 
-#include <list>
+#include <map>
+#include <stdexcept>
+#include <utility>
 
 #include "atem_types.h"
 #include "config_helpers.h"
@@ -45,7 +47,7 @@ class ProtocolHeader {
    *
    * @param data Raw data that's at least 12 bytes long
    */
-  ProtocolHeader(const uint8_t* data);
+  ProtocolHeader(uint8_t* data);
   ~ProtocolHeader();
 
   /**
@@ -130,6 +132,7 @@ class ProtocolHeader {
   }
 
  protected:
+  bool alloc_{false};
   uint8_t* data_;
 };  // namespace atem
 
@@ -151,12 +154,32 @@ class AtemCommunication {
   void Stop();
 
   InputProperty* GetInputProperty(Source source) {
-    for (auto inpr : this->input_properties_)
-      if (inpr->source == source) return inpr;
-    return nullptr;
+    auto it = this->input_properties_.find(source);
+    if (it == this->input_properties_.end())
+      return nullptr;
+    else
+      return (*it).second;
   }
-  std::list<InputProperty*>* GetInputProperties() {
+  std::map<atem::Source, InputProperty*>* GetInputProperties() {
     return &this->input_properties_;
+  }
+
+  Source GetPreviewInput(uint8_t me = 0) {
+    if (this->prv_inp_ == nullptr) return (Source)0xFFFF;
+    return this->prv_inp_[me];
+  }
+  Source GetProgramInput(uint8_t me = 0) {
+    if (this->prg_inp_ == nullptr) return (Source)0xFFFF;
+    return this->prg_inp_[me];
+  }
+  Source GetAuxInput(uint8_t channel = 0) {
+    if (this->aux_inp_ == nullptr) return (Source)0xFFFF;
+    return this->aux_inp_[channel];
+  }
+  TransitionPosition GetTransitionPosition(uint8_t me = 0) {
+    if (this->trps_ == nullptr)
+      return (TransitionPosition){.in_transition = false, .position = 0};
+    return this->trps_[me];
   }
 
   void SetPreviewInput(Source videoSource, uint8_t ME = 0);
@@ -169,7 +192,7 @@ class AtemCommunication {
   class Config : public config_manager::Config {
    public:
     Config() { this->name_ = "atem"; }
-    esp_err_t from_json(cJSON* json);
+    esp_err_t FromJson(cJSON* json);
 
     CONFIG_DEFINE_NUMBER(port, uint16_t, 9910);
     CONFIG_DEFINE_NUMBER(timeout, uint8_t, 5);
@@ -189,19 +212,19 @@ class AtemCommunication {
   udp_pcb* pcb_;
 
   uint16_t session_{0x0B06};
-  uint16_t local_id_{0x0000};
-  uint16_t remote_id_{0x0000};
+  uint16_t local_id_{0};
+  uint16_t remote_id_{0};
   uint16_t init_id_{0};
   uint32_t init_pkt_{0};
-
-  bool alloc_{false};
+  uint16_t parced_id_{0};
 
   // Atem state
+  std::map<atem::Source, InputProperty*> input_properties_;
   Topology top_;
-  std::list<InputProperty*> input_properties_;
   Source* prg_inp_{nullptr};
   Source* prv_inp_{nullptr};
-  Source* aux_chn_{nullptr};
+  Source* aux_inp_{nullptr};
+  TransitionPosition* trps_{nullptr};
 
   AtemCommunication();
 

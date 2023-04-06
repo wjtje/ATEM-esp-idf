@@ -106,24 +106,7 @@ enum Source : uint16_t {
   ME4_PREVIEW,
 };
 
-struct ProgramInput {
-  uint8_t ME;
-  Source source;
-};
-
-struct PreviewInput {
-  uint8_t ME;
-  Source source;
-  bool visable;
-};
-
-struct AuxInput {
-  uint8_t channel;
-  Source source;
-};
-
 struct InputProperty {
-  Source source;
   char name_long[21];
   char name_short[5];
 };
@@ -134,14 +117,12 @@ struct ProtocolVerion {
 };
 
 struct TransitionPosition {
-  uint8_t ME;
   bool in_transition;
   uint16_t position;
 };
 
 struct Topology {
   uint8_t num_me;
-  uint8_t num_sources;
   uint8_t num_aux;
 };
 

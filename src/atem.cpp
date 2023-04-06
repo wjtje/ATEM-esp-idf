@@ -13,6 +13,7 @@ ProtocolHeader::ProtocolHeader(CommandFlags flags, uint16_t length,
   if (length > 2047 || length < 12) ESP_LOGW(TAG, "Length to small or large");
   this->data_ = (uint8_t *)malloc(12);
   memset(this->data_ + 4, 0x0, 8);
+  this->alloc_ = true;
 
   // Place the flags and length at the right place
   this->data_[0] = ((uint8_t)flags << 3) | HIGH_BYTE(length);
@@ -24,16 +25,15 @@ ProtocolHeader::ProtocolHeader(CommandFlags flags, uint16_t length,
   this->SetId(id);
 }
 
-ProtocolHeader::ProtocolHeader(const uint8_t *data) {
-  this->data_ = (uint8_t *)malloc(12);
-  memcpy(this->data_, data, 12);
-}
+ProtocolHeader::ProtocolHeader(uint8_t *data) { this->data_ = data; }
 
-ProtocolHeader::~ProtocolHeader() { free(this->data_); }
+ProtocolHeader::~ProtocolHeader() {
+  if (this->alloc_) free(this->data_);
+}
 
 AtemCommunication::AtemCommunication() {
   this->config_ = new Config();
-  config_manager::ConfigManager::GetInstance()->restore(this->config_);
+  config_manager::ConfigManager::GetInstance()->Restore(this->config_);
 
   pbuf_init();
 
@@ -55,10 +55,10 @@ AtemCommunication::AtemCommunication() {
               "atem_int", 4096, this, tskIDLE_PRIORITY + 5,
               &this->thread_interval_);
 
-  this->parser_queue_ = xQueueCreate(6, sizeof(pbuf *));
+  this->parser_queue_ = xQueueCreate(20, sizeof(pbuf *));
   if (this->parser_queue_ == NULL) ESP_LOGE(TAG, "Failed to create queue");
   xTaskCreate([](void *arg) { ((AtemCommunication *)arg)->ThreadParser_(); },
-              "atem_par", 4096, this, tskIDLE_PRIORITY + 5,
+              "atem_par", 4096, this, configMAX_PRIORITIES,
               &this->thread_parser_);
 }
 
@@ -66,7 +66,6 @@ void AtemCommunication::Stop() {
   // Stop the threads
   vTaskDelete(this->thread_interval_);
   vTaskDelete(this->thread_parser_);
-
   vQueueDelete(this->parser_queue_);
 
   // Clear the connection
@@ -109,12 +108,6 @@ void AtemCommunication::SendCommand_(const char *command, const uint16_t length,
 
 void AtemCommunication::ReceivePacket_(pbuf *p, const ip_addr_t *addr,
                                        uint16_t port) {
-  // Check addr and length
-  if (addr->u_addr.ip4.addr != this->config_->get_ip()->u_addr.ip4.addr) {
-    ESP_LOGW(TAG, "Received data from other ip");
-    pbuf_free(p);
-  }
-
   if (p->len < 12) {
     ESP_LOGW(TAG, "Received a package that's to small");
     pbuf_free(p);
@@ -173,7 +166,8 @@ void AtemCommunication::ReceivePacket_(pbuf *p, const ip_addr_t *addr,
   // Respond to RESEND request
   if (header->GetFlags() & ProtocolHeader::RESEND &&
       this->state_ == ConnectionState::ACTIVE) {
-    ESP_LOGW(TAG, "<- Resend request for %u", header->GetResendId());
+    ESP_LOGW(TAG, "<- Resend request for %u (local_id: %u)",
+             header->GetResendId(), this->local_id_);
 
     auto p = new ProtocolHeader(ProtocolHeader::ACK, 12, this->session_,
                                 header->GetResendId());
@@ -181,7 +175,9 @@ void AtemCommunication::ReceivePacket_(pbuf *p, const ip_addr_t *addr,
   }
 
   // Got ACK for packet
-  if (header->GetAckId() != 0) ESP_LOGD(TAG, "<- ACK %u", header->GetAckId());
+  if (header->GetAckId() != 0)
+    ESP_LOGD(TAG, "<- ACK %u (local_id: %u)", header->GetAckId(),
+             this->local_id_);
 
   // Send to parser thread using queue
   if (header->GetLength() > 12) {
@@ -189,7 +185,7 @@ void AtemCommunication::ReceivePacket_(pbuf *p, const ip_addr_t *addr,
     if (xQueueSendFromISR(this->parser_queue_, (void *)(&p),
                           &xHigherPriorityTaskWoken) != pdTRUE) {
       ESP_LOGE(TAG, "Failed to add package to queue");
-      pbuf_free(p);
+      goto cleanup;
     }
 
     delete header;
@@ -257,7 +253,8 @@ void AtemCommunication::ThreadInterval_() {
     }
 
     // Send keep alive if connection is active
-    if (this->state_ == ConnectionState::ACTIVE) {
+    if (this->state_ == ConnectionState::ACTIVE &&
+        now - this->last_communication_ > 500000) {
       auto p = new ProtocolHeader(
           (ProtocolHeader::CommandFlags)(ProtocolHeader::ACK |
                                          ProtocolHeader::RESPONSE),
@@ -278,11 +275,18 @@ void AtemCommunication::ResetConnection_() {
   this->session_ = 0x0B06;
   this->local_id_ = 0;
   this->remote_id_ = 0;
+  this->parced_id_ = 0;
 
-  // Clear allocated memory
-  free(this->prg_inp_);
-  free(this->prv_inp_);
-  free(this->aux_chn_);
+  // Free allocated memory
+  for (auto it = this->input_properties_.begin();
+       it != this->input_properties_.end(); ++it) {
+    delete (*it).second;
+    this->input_properties_.erase(it);
+  }
+  if (this->prg_inp_ != nullptr) free(this->prg_inp_);
+  if (this->prv_inp_ != nullptr) free(this->prv_inp_);
+  if (this->trps_ != nullptr) free(this->trps_);
+  if (this->aux_inp_ != nullptr) free(this->aux_inp_);
 
   // Free pbuf in parser queue
   pbuf *p;
@@ -295,9 +299,14 @@ void AtemCommunication::ThreadParser_() {
     if (!xQueueReceive(this->parser_queue_, &p, portMAX_DELAY)) continue;
     ESP_LOGI(TAG, "Parser: Received message of %u bytes", p->tot_len);
 
+    // Define variables
+    auto header = new ProtocolHeader((uint8_t *)p->payload);
     uint16_t i = 12;
     uint16_t cmd_len = 0;
     char cmd_str[] = {0, 0, 0, 0};
+
+    if (header->GetId() <= this->parced_id_) goto cleanup;
+
     while (i < p->tot_len) {
       // Get information for command header
       cmd_len = pbuf_get_at(p, i) << 8 | pbuf_get_at(p, i + 1);
@@ -314,79 +323,82 @@ void AtemCommunication::ThreadParser_() {
 
       // Topology
       if (!memcmp(cmd_str, "_top", 4)) {
-        // Save
+        // Copy information
         this->top_.num_me = pbuf_get_at(p, i + 8);
-        this->top_.num_sources = pbuf_get_at(p, i + 9);
-        this->top_.num_aux = pbuf_get_at(p, i + 3);
+        this->top_.num_aux = pbuf_get_at(p, i + 11);
 
-        // Allocate
+        // Allocate buffers
         this->prg_inp_ = (Source *)calloc(this->top_.num_me, sizeof(Source));
         this->prv_inp_ = (Source *)calloc(this->top_.num_me, sizeof(Source));
-        this->aux_chn_ = (Source *)calloc(this->top_.num_aux, sizeof(Source));
+        this->trps_ = (TransitionPosition *)calloc(this->top_.num_me,
+                                                   sizeof(TransitionPosition));
+        this->aux_inp_ = (Source *)calloc(this->top_.num_aux, sizeof(Source));
 
-        this->alloc_ = true;
-        goto next;
+        ESP_LOGI(TAG, "Topology: (me: %u) (aux: %u)", this->top_.num_me,
+                 this->top_.num_aux);
       }
 
       // Program Input
-      if (!strcmp(cmd_str, "PrgI")) {
-        ProgramInput msg_ = {
-            .ME = pbuf_get_at(p, i + 8),
-            .source =
-                (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11)),
-        };
-        if (this->alloc_) this->prg_inp_[msg_.ME] = msg_.source;
-        esp_event_post(ATEM_EVENT, ATEM_CMD("PrgI"), &msg_,
-                       sizeof(ProgramInput), TTW);
+      if (!memcmp(cmd_str, "PrgI", 4)) {
+        uint8_t me = pbuf_get_at(p, i + 8);
+        Source source =
+            (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11));
+
+        ESP_LOGI(TAG, "New program: me: %u source: %u", me, source);
+
+        if (this->prg_inp_ == nullptr || this->top_.num_me - 1 < me) goto next;
+        this->prg_inp_[me] = source;
+
         goto next;
       }
 
       // Preview Input
-      if (!strcmp(cmd_str, "PrvI")) {
-        PreviewInput msg_ = {
-            .ME = pbuf_get_at(p, i + 8),
-            .source =
-                (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11)),
-            .visable = (bool)(pbuf_get_at(p, i + 4) & 0x01),
-        };
-        if (this->alloc_) this->prv_inp_[msg_.ME] = msg_.source;
-        esp_event_post(ATEM_EVENT, ATEM_CMD("PrvI"), &msg_,
-                       sizeof(PreviewInput), TTW);
+      if (!memcmp(cmd_str, "PrvI", 4)) {
+        uint8_t me = pbuf_get_at(p, i + 8);
+        Source source =
+            (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11));
+
+        ESP_LOGI(TAG, "New preview: me: %u source: %u", me, source);
+
+        if (this->prv_inp_ == nullptr || this->top_.num_me - 1 < me) goto next;
+        this->prv_inp_[me] = source;
+
         goto next;
       }
 
       // AUX Channel
-      if (!strcmp(cmd_str, "AuxS")) {
-        AuxInput msg_ = {
-            .channel = pbuf_get_at(p, i + 8),
-            .source =
-                (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11)),
-        };
-        if (this->alloc_) this->aux_chn_[msg_.channel] = msg_.source;
-        esp_event_post(ATEM_EVENT, ATEM_CMD("AuxS"), &msg_, sizeof(AuxInput),
-                       TTW);
+      if (!memcmp(cmd_str, "AuxS", 4)) {
+        uint8_t channel = pbuf_get_at(p, i + 8);
+        Source source =
+            (Source)(pbuf_get_at(p, i + 10) << 8 | pbuf_get_at(p, i + 11));
+
+        ESP_LOGI(TAG, "New aux: channel: %u source: %u", channel, source);
+
+        if (this->aux_inp_ == nullptr || this->top_.num_aux - 1 < channel)
+          goto next;
+        this->aux_inp_[channel] = source;
+
         goto next;
       }
 
       // Transition Position
-      if (!strcmp(cmd_str, "TrPs")) {
-        TransitionPosition msg_ = {
-            .ME = pbuf_get_at(p, i + 8),
-            .in_transition = (bool)(pbuf_get_at(p, i + 9) & 0x01),
-            .position = (uint16_t)(pbuf_get_at(p, i + 12) << 8 |
-                                   pbuf_get_at(p, i + 13)),
-        };
-        esp_event_post(ATEM_EVENT, ATEM_CMD("TrPs"), &msg_,
-                       sizeof(TransitionPosition), TTW);
+      if (!memcmp(cmd_str, "TrPs", 4)) {
+        uint8_t me = pbuf_get_at(p, i + 8);
+
+        if (this->trps_ == nullptr || this->top_.num_me - 1 < me) goto next;
+        this->trps_[me].in_transition = (bool)(pbuf_get_at(p, i + 9) & 0x01);
+        this->trps_[me].position =
+            (uint16_t)(pbuf_get_at(p, i + 12) << 8 | pbuf_get_at(p, i + 13));
+
         goto next;
       }
 
-      // Input Propertie
-      if (!strcmp(cmd_str, "InPr")) {
+      // Input Property
+      if (!memcmp(cmd_str, "InPr", 4)) {
+        auto source =
+            (Source)(pbuf_get_at(p, i + 8) << 8 | pbuf_get_at(p, i + 9));
         auto inpr = (InputProperty *)malloc(sizeof(InputProperty));
 
-        inpr->source =
-            (Source)(pbuf_get_at(p, i + 8) << 8 | pbuf_get_at(p, i + 9));
         pbuf_copy_partial(p, inpr->name_long, sizeof(inpr->name_long) - 1,
                           i + 10);
         pbuf_copy_partial(p, inpr->name_short, sizeof(inpr->name_short) - 1,
@@ -394,20 +406,32 @@ void AtemCommunication::ThreadParser_() {
 
         // TODO: Clean garbage at the end of the string
 
-        this->input_properties_.push_back(inpr);
+        if (!this->input_properties_
+                 .insert(std::pair<Source, InputProperty *>(source, inpr))
+                 .second) {
+          // Item already exsists, cleaning old one
+          auto current = this->input_properties_.at(source);
+          free(current);
+          current = inpr;
+        }
       }
 
     next:
       i += cmd_len;
     }
 
+    this->parced_id_ = header->GetId();
+
+  cleanup:
+    delete header;
     pbuf_free(p);
+    esp_event_post(ATEM_EVENT, 0, nullptr, 0, TTW);
   }
 }
 
-esp_err_t AtemCommunication::Config::from_json(cJSON *json) {
+esp_err_t AtemCommunication::Config::FromJson(cJSON *json) {
   this->ip_.type = IPADDR_TYPE_V4;
-  this->ip_.u_addr.ip4.addr = this->json_parse_ipstr_(json, "ip");
+  this->ip_.u_addr.ip4.addr = this->JsonParseIpstr_(json, "ip");
 
   CONFIG_PARSE_NUMBER(json, "port", uint16_t, port);
   CONFIG_PARSE_NUMBER(json, "timeout", uint8_t, timeout);
