@@ -211,8 +211,8 @@ void AtemCommunication::ThreadInterval_() {
       ESP_LOGI(TAG, "Connecting to %s", ip_str);
 
       // Connect
-      ESP_ERROR_CHECK(udp_connect(this->pcb_, this->config_->get_ip(),
-                                  this->config_->get_port()));
+      ESP_ERROR_CHECK_WITHOUT_ABORT(udp_connect(
+          this->pcb_, this->config_->get_ip(), this->config_->get_port()));
 
       // Send init
       auto p =
@@ -277,16 +277,26 @@ void AtemCommunication::ResetConnection_() {
   this->remote_id_ = 0;
   this->parced_id_ = 0;
 
-  // Free allocated memory
-  for (auto it = this->input_properties_.begin();
-       it != this->input_properties_.end(); ++it) {
-    delete (*it).second;
-    this->input_properties_.erase(it);
+  if (this->prg_inp_ != nullptr) {
+    free(this->prg_inp_);
+    this->prg_inp_ = nullptr;
   }
-  if (this->prg_inp_ != nullptr) free(this->prg_inp_);
-  if (this->prv_inp_ != nullptr) free(this->prv_inp_);
-  if (this->trps_ != nullptr) free(this->trps_);
-  if (this->aux_inp_ != nullptr) free(this->aux_inp_);
+  if (this->prv_inp_ != nullptr) {
+    free(this->prv_inp_);
+    this->prv_inp_ = nullptr;
+  }
+  if (this->trps_ != nullptr) {
+    free(this->trps_);
+    this->trps_ = nullptr;
+  }
+  if (this->aux_inp_ != nullptr) {
+    free(this->aux_inp_);
+    this->aux_inp_ = nullptr;
+  }
+  if (this->usk_on_air_ != nullptr) {
+    free(this->usk_on_air_);
+    this->usk_on_air_ = nullptr;
+  }
 
   // Free pbuf in parser queue
   pbuf *p;
@@ -325,6 +335,7 @@ void AtemCommunication::ThreadParser_() {
       if (!memcmp(cmd_str, "_top", 4)) {
         // Copy information
         this->top_.num_me = pbuf_get_at(p, i + 8);
+        this->top_.num_dsk = pbuf_get_at(p, i + 10);
         this->top_.num_aux = pbuf_get_at(p, i + 11);
 
         // Allocate buffers
@@ -333,6 +344,8 @@ void AtemCommunication::ThreadParser_() {
         this->trps_ = (TransitionPosition *)calloc(this->top_.num_me,
                                                    sizeof(TransitionPosition));
         this->aux_inp_ = (Source *)calloc(this->top_.num_aux, sizeof(Source));
+        this->usk_on_air_ =
+            (uint8_t *)calloc(this->top_.num_me, sizeof(uint8_t));
 
         ESP_LOGI(TAG, "Topology: (me: %u) (aux: %u)", this->top_.num_me,
                  this->top_.num_aux);
@@ -393,6 +406,21 @@ void AtemCommunication::ThreadParser_() {
         goto next;
       }
 
+      // Keyer on Air
+      if (!memcmp(cmd_str, "KeOn", 4)) {
+        uint8_t me = pbuf_get_at(p, i + 8);
+        uint8_t keyer = pbuf_get_at(p, i + 9);
+
+        ESP_LOGI(TAG, "ME: %u, keyer: %u, air: %u", me, keyer,
+                 pbuf_get_at(p, i + 10));
+
+        if (this->usk_on_air_ == nullptr || this->top_.num_me - 1 < me ||
+            keyer > 8)
+          goto next;
+        this->usk_on_air_[me] &= ~(0x1 << keyer);
+        this->usk_on_air_[me] |= (pbuf_get_at(p, i + 10) << keyer);
+      }
+
       // Input Property
       if (!memcmp(cmd_str, "InPr", 4)) {
         auto source =
@@ -404,16 +432,22 @@ void AtemCommunication::ThreadParser_() {
         pbuf_copy_partial(p, inpr->name_short, sizeof(inpr->name_short) - 1,
                           i + 30);
 
-        // TODO: Clean garbage at the end of the string
+        // Clean garbage at the end of the string
+        size_t len;
+        len = strlen(inpr->name_long);
+        if (len > 20) len = 20;
+        memset(inpr->name_long + len, 0, sizeof(inpr->name_long) - len);
+        len = strlen(inpr->name_short);
+        if (len > 4) len = 4;
+        memset(inpr->name_short + len, 0, sizeof(inpr->name_short) - len);
 
-        if (!this->input_properties_
-                 .insert(std::pair<Source, InputProperty *>(source, inpr))
-                 .second) {
-          // Item already exsists, cleaning old one
-          auto current = this->input_properties_.at(source);
-          free(current);
-          current = inpr;
+        // Remove if already exists
+        if (this->input_properties_.contains(source)) {
+          delete this->input_properties_[source];
+          this->input_properties_.erase(source);
         }
+
+        this->input_properties_[source] = inpr;
       }
 
     next:
@@ -425,7 +459,7 @@ void AtemCommunication::ThreadParser_() {
   cleanup:
     delete header;
     pbuf_free(p);
-    esp_event_post(ATEM_EVENT, 0, nullptr, 0, TTW);
+    esp_event_post(ATEM_EVENT, 0, nullptr, 0, 10 / portTICK_PERIOD_MS);
   }
 }
 
@@ -440,24 +474,51 @@ esp_err_t AtemCommunication::Config::FromJson(cJSON *json) {
 
 void AtemCommunication::SetPreviewInput(Source videoSource, uint8_t ME) {
   uint8_t data[] = {ME, 0x00, HIGH_BYTE(videoSource), LOW_BYTE(videoSource)};
-  return this->SendCommand_("CPvI", 4, data);
+  this->SendCommand_("CPvI", 4, data);
 }
 
 void AtemCommunication::SetAuxInput(Source videoSource, uint8_t channel,
                                     bool active) {
   uint8_t data[] = {active, channel, HIGH_BYTE((uint16_t)videoSource),
                     LOW_BYTE((uint16_t)videoSource)};
-  return this->SendCommand_("CAuS", 4, data);
+  this->SendCommand_("CAuS", 4, data);
+}
+
+void AtemCommunication::SetDskFill(Source fillSource, uint8_t keyer) {
+  uint8_t data[] = {keyer, 0, HIGH_BYTE((uint16_t)fillSource),
+                    LOW_BYTE((uint8_t)fillSource)};
+  this->SendCommand_("CDsF", sizeof(data), data);
+}
+
+void AtemCommunication::SetDskKey(Source keySource, uint8_t keyer) {
+  uint8_t data[] = {keyer, 0, HIGH_BYTE((uint16_t)keySource),
+                    LOW_BYTE((uint8_t)keySource)};
+  this->SendCommand_("CDsC", sizeof(data), data);
+}
+
+void AtemCommunication::SetDskOnAir(bool onAir, uint8_t keyer) {
+  uint8_t data[] = {keyer, onAir, 0, 0};
+  this->SendCommand_("CDsL", sizeof(data), data);
 }
 
 void AtemCommunication::Cut(uint8_t ME) {
   uint8_t data[] = {ME, 0x00, 0x00, 0x00};
-  return this->SendCommand_("DCut", 4, data);
+  this->SendCommand_("DCut", 4, data);
 }
 
 void AtemCommunication::Auto(uint8_t ME) {
   uint8_t data[] = {ME, 0x00, 0x00, 0x00};
-  return this->SendCommand_("DAut", 4, data);
+  this->SendCommand_("DAut", 4, data);
+}
+
+void AtemCommunication::DskAuto(uint8_t keyer) {
+  uint8_t data[] = {keyer, 0x00, 0x00, 0x00};
+  this->SendCommand_("DDsA", 4, data);
+}
+
+void AtemCommunication::SetUskOnAir(bool onAir, uint8_t keyer, uint8_t ME) {
+  uint8_t data[] = {ME, keyer, onAir, 0x00};
+  this->SendCommand_("CKOn", 4, data);
 }
 
 }  // namespace atem

@@ -149,18 +149,17 @@ class AtemCommunication {
   enum class ConnectionState { NOT_CONNECTED, CONNECTED, INIT, ACTIVE };
   /**
    * @brief Stops the atem protocol
-   *
    */
   void Stop();
 
-  InputProperty* GetInputProperty(Source source) {
+  const InputProperty* GetInputProperty(Source source) {
     auto it = this->input_properties_.find(source);
     if (it == this->input_properties_.end())
       return nullptr;
     else
       return (*it).second;
   }
-  std::map<atem::Source, InputProperty*>* GetInputProperties() {
+  const std::map<atem::Source, InputProperty*>* GetInputProperties() {
     return &this->input_properties_;
   }
 
@@ -181,12 +180,21 @@ class AtemCommunication {
       return (TransitionPosition){.in_transition = false, .position = 0};
     return this->trps_[me];
   }
+  bool GetUskOnAir(uint8_t keyer = 0, uint8_t ME = 0) {
+    if (this->usk_on_air_ == nullptr) return false;
+    return this->usk_on_air_[ME] & (0x1 << keyer);
+  }
 
   void SetPreviewInput(Source videoSource, uint8_t ME = 0);
   void SetAuxInput(Source videoSource, uint8_t channel = 0, bool active = true);
+  void SetDskFill(Source fillSource, uint8_t keyer = 0);
+  void SetDskKey(Source keySource, uint8_t keyer = 0);
+  void SetDskOnAir(bool onAir, uint8_t keyer = 0);
+  void SetUskOnAir(bool onAir, uint8_t keyer = 0, uint8_t ME = 0);
 
   void Cut(uint8_t ME = 0);
   void Auto(uint8_t ME = 0);
+  void DskAuto(uint8_t keyer = 0);
 
  protected:
   class Config : public config_manager::Config {
@@ -224,6 +232,7 @@ class AtemCommunication {
   Source* prg_inp_{nullptr};
   Source* prv_inp_{nullptr};
   Source* aux_inp_{nullptr};
+  uint8_t* usk_on_air_{nullptr};
   TransitionPosition* trps_{nullptr};
 
   AtemCommunication();
