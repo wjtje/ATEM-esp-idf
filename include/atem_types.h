@@ -116,9 +116,33 @@ struct TransitionPosition {
 };
 
 struct Topology {
-  uint8_t num_me;
-  uint8_t num_dsk;
-  uint8_t num_aux;
+  uint8_t me;
+  uint8_t sources;
+  uint8_t dsk;
+  uint8_t aux;
+  uint8_t mixminus_outputs;
+  uint8_t mediaplayers;
+  // uint8_t multiviewers;
+  uint8_t rs485;
+  uint8_t hyperdecks;
+  uint8_t dve;
+  uint8_t stingers;
+  uint8_t supersources;
+};
+
+struct DveProperties {
+  int size_x;
+  int size_y;
+  int pos_x;
+  int pos_y;
+  int rotation;
+};
+
+enum class DveProperty { SIZE_X, SIZE_Y, POS_X, POS_Y, ROTATION };
+
+struct ProtocolVersion {
+  uint16_t major;
+  uint16_t minor;
 };
 
 }  // namespace atem
