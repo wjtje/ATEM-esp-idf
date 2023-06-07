@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 namespace atem {
+namespace types {
 
 enum Source : uint16_t {
   BLACK,
@@ -110,9 +111,11 @@ struct ProtocolVerion {
   uint16_t minor;
 };
 
-struct TransitionPosition {
+struct TransitionState {
   bool in_transition;
   uint16_t position;
+  uint8_t style;
+  uint8_t next;
 };
 
 struct Topology {
@@ -125,12 +128,22 @@ struct Topology {
   // uint8_t multiviewers;
   uint8_t rs485;
   uint8_t hyperdecks;
-  uint8_t dve;
+  uint8_t usk;
   uint8_t stingers;
   uint8_t supersources;
 };
 
-struct DveProperties {
+struct UskProperties {
+  uint8_t type;
+  types::Source fill;
+  types::Source key;
+  int16_t top;
+  int16_t bottom;
+  int16_t left;
+  int16_t right;
+};
+
+struct UskDveProperties {
   int size_x;
   int size_y;
   int pos_x;
@@ -138,11 +151,12 @@ struct DveProperties {
   int rotation;
 };
 
-enum class DveProperty { SIZE_X, SIZE_Y, POS_X, POS_Y, ROTATION };
+enum class UskDveProperty { SIZE_X, SIZE_Y, POS_X, POS_Y, ROTATION };
 
 struct ProtocolVersion {
   uint16_t major;
   uint16_t minor;
 };
 
+}  // namespace types
 }  // namespace atem

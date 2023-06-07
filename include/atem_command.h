@@ -10,6 +10,10 @@
 
 namespace atem {
 
+/**
+ * @brief Base class of all commands that can be send to the ATEM.
+ *
+ */
 class AtemCommand {
  public:
   AtemCommand(void *data) : has_alloc_(false), data_(data) {}
@@ -41,9 +45,13 @@ class AtemCommand {
   /**
    * @brief Get the data from the command (excluding the header)
    *
-   * @return void*
+   * @tparam T
+   * @return T
    */
-  void *GetData() { return (uint8_t *)this->data_ + 8; }
+  template <typename T>
+  T GetData() {
+    return (T)((uint8_t *)this->data_ + 8);
+  }
   /**
    * @brief Get the access to the raw buffer, use GetLength to get the size of
    * the buffer
@@ -68,7 +76,8 @@ class Auto : public AtemCommand {
 
 class AuxInput : public AtemCommand {
  public:
-  AuxInput(Source source, uint8_t channel = 0) : AtemCommand("CAuS", 12) {
+  AuxInput(types::Source source, uint8_t channel = 0)
+      : AtemCommand("CAuS", 12) {
     ((uint8_t *)this->data_)[8] = 1;
     ((uint8_t *)this->data_)[9] = channel;
     ((uint16_t *)this->data_)[5] = htons(source);
@@ -85,8 +94,8 @@ class Cut : public AtemCommand {
 class UskDveKeyFrameProperties : public AtemCommand {
  public:
   UskDveKeyFrameProperties(
-      std::initializer_list<std::tuple<DveProperty, int>> p, uint8_t kf = 1,
-      uint8_t keyer = 0, uint8_t me = 0)
+      std::initializer_list<std::tuple<types::UskDveProperty, int>> p,
+      uint8_t kf = 1, uint8_t keyer = 0, uint8_t me = 0)
       : AtemCommand("CKFP", 64) {
     uint32_t mask = 0;
 
@@ -116,8 +125,9 @@ class UskDveKeyFrameRun : public AtemCommand {
 
 class UskDveProperties : public AtemCommand {
  public:
-  UskDveProperties(std::initializer_list<std::tuple<DveProperty, int>> p,
-                   uint8_t keyer = 0, uint8_t me = 0)
+  UskDveProperties(
+      std::initializer_list<std::tuple<types::UskDveProperty, int>> p,
+      uint8_t keyer = 0, uint8_t me = 0)
       : AtemCommand("CKDV", 72) {
     uint32_t mask = 0;
 
@@ -133,6 +143,27 @@ class UskDveProperties : public AtemCommand {
   }
 };
 
+class UskFill : public AtemCommand {
+ public:
+  UskFill(types::Source source, uint8_t keyer = 0, uint8_t me = 0)
+      : AtemCommand("CKeF", 12) {
+    GetData<uint8_t *>()[0] = me;
+    GetData<uint8_t *>()[1] = keyer;
+    GetData<uint16_t *>()[1] = htons(source);
+  }
+};
+
+class UskType : public AtemCommand {
+ public:
+  UskType(uint8_t type, uint8_t keyer = 0, uint8_t me = 0)
+      : AtemCommand("CKTp", 16) {
+    GetData<uint8_t *>()[0] = 1;  // Mask
+    GetData<uint8_t *>()[1] = me;
+    GetData<uint8_t *>()[2] = keyer;
+    GetData<uint8_t *>()[3] = type;
+  }
+};
+
 class UskOnAir : public AtemCommand {
  public:
   UskOnAir(bool enabled, uint8_t key = 0, uint8_t me = 0)
@@ -145,7 +176,7 @@ class UskOnAir : public AtemCommand {
 
 class PreviewInput : public AtemCommand {
  public:
-  PreviewInput(Source source, uint8_t me = 0) : AtemCommand("CPvI", 12) {
+  PreviewInput(types::Source source, uint8_t me = 0) : AtemCommand("CPvI", 12) {
     ((uint8_t *)this->data_)[8] = me;
     ((uint16_t *)this->data_)[5] = htons(source);
   }
@@ -153,9 +184,27 @@ class PreviewInput : public AtemCommand {
 
 class ProgramInput : public AtemCommand {
  public:
-  ProgramInput(Source source, uint8_t me = 0) : AtemCommand("CPgI", 12) {
+  ProgramInput(types::Source source, uint8_t me = 0) : AtemCommand("CPgI", 12) {
     ((uint8_t *)this->data_)[8] = me;
     ((uint16_t *)this->data_)[5] = htons(source);
+  }
+};
+
+class TransitionPosition : public AtemCommand {
+ public:
+  TransitionPosition(uint16_t position, uint8_t me = 0)
+      : AtemCommand("CTPs", 12) {
+    ((uint8_t *)this->data_)[8] = me;
+    ((uint16_t *)this->data_)[5] = htons(position);
+  }
+};
+
+class TransitionState : public AtemCommand {
+ public:
+  TransitionState(uint8_t next, uint8_t me = 0) : AtemCommand("CTTp", 12) {
+    GetData<uint8_t *>()[0] = 0x2;  // Mask
+    GetData<uint8_t *>()[1] = me;
+    GetData<uint8_t *>()[3] = next;
   }
 };
 

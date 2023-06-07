@@ -1,7 +1,5 @@
 #include "atem.h"
 
-#include <esp_timer.h>
-
 namespace atem {
 
 ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
@@ -18,23 +16,27 @@ Atem *Atem::GetInstance() {
   return nullptr;
 }
 
-esp_err_t Atem::Config::FromJson(cJSON *json) {
-  this->ip_.addr = this->JsonParseIpstr_(json, "ip");
+esp_err_t Atem::Config::Decode_(cJSON *json) {
+  cJSON_GetObjectCheck(json, atem, Object);
 
-  cJSON *port_obj = cJSON_GetObjectItemCaseSensitive(json, "port");
-  if (!cJSON_IsNumber(port_obj)) return ESP_FAIL;
+  cJSON_GetObjectCheck(atem_obj, ip, String);
+  if (!ip4addr_aton(ip_obj->valuestring, &this->ip_)) {
+    ESP_LOGE(TAG, "Expected key 'ip' to be a valid ip4 adress");
+    return ESP_FAIL;
+  }
+
+  cJSON_GetObjectCheck(atem_obj, port, Number);
   this->port_ = (uint16_t)(port_obj->valueint);
 
-  cJSON *timeout_obj = cJSON_GetObjectItemCaseSensitive(json, "timeout");
-  if (!cJSON_IsNumber(timeout_obj)) return ESP_FAIL;
+  cJSON_GetObjectCheck(atem_obj, timeout, Number);
   this->timeout_ = (uint8_t)(timeout_obj->valueint);
 
   return ESP_OK;
 }
 
 Atem::Atem() {
-  this->config_ = new Config();
-  config_manager::ConfigManager::GetInstance()->Restore(this->config_);
+  ESP_ERROR_CHECK_WITHOUT_ABORT(
+      config_manager::ConfigManager::Restore(&this->config_));
 
   // Allocate udp
   this->udp_ = udp_new();
@@ -47,8 +49,8 @@ Atem::Atem() {
   udp_recv(this->udp_, this->recv_, this);
 
   // Connect to ATEM
-  ESP_ERROR_CHECK_WITHOUT_ABORT(udp_connect(this->udp_, this->config_->GetIp(),
-                                            this->config_->GetPort()));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(
+      udp_connect(this->udp_, this->config_.GetIp(), this->config_.GetPort()));
 
   // Allocate queue
   this->task_queue_ = xQueueCreate(10, sizeof(pbuf *));
@@ -78,14 +80,15 @@ Atem::~Atem() {
   // Clear memory
   delete this->prg_inp_;
   delete this->prv_inp_;
-  delete this->trps_;
+  delete this->trst_;
   delete this->aux_inp_;
   delete this->usk_on_air_;
   delete this->dve_;
+  delete this->usk_;
 
   auto itr = this->input_properties_.begin();
   while (itr != this->input_properties_.end()) {
-    InputProperty *i = itr->second;
+    types::InputProperty *i = itr->second;
     itr = this->input_properties_.erase(itr);
     delete i;
   }
@@ -156,7 +159,7 @@ void Atem::recv_(void *arg, udp_pcb *pcb, pbuf *p, const ip_addr_t *addr,
     ESP_LOGW(TAG, "<- Resend request for %u", packet->GetResendId());
     // We don't actually save the messages, just pretend that it was an ACK
     AtemPacket *p = new AtemPacket(0x1, packet->GetSessionId(), 12);
-    p->SetLocalId(packet->GetRemoteId());
+    p->SetLocalId(packet->GetResendId());
     ((Atem *)arg)->SendPacket_(p);
     delete p;
   }
@@ -181,9 +184,9 @@ void Atem::task_() {
     // Wait for package or timeout
     if (!xQueueReceive(
             this->task_queue_, &p,
-            (this->config_->GetTimeout() * 1000) / portTICK_PERIOD_MS)) {
+            (this->config_.GetTimeout() * 1000) / portTICK_PERIOD_MS)) {
       ESP_LOGW(TAG, "Timeout, didn't receive anything for the last %ums",
-               (this->config_->GetTimeout() * 1000));
+               (this->config_.GetTimeout() * 1000));
       // Reset local variables
       this->local_id_ = 0;
       this->SendInit_();
@@ -203,47 +206,52 @@ void Atem::task_() {
 
     for (auto command : *p) {
       if (command == "_ver") {  // Protocol version
-        this->ver_ = {.major = ntohs(((uint16_t *)command.GetData())[0]),
-                      .minor = ntohs(((uint16_t *)command.GetData())[1])};
+        this->ver_ = {.major = ntohs(command.GetData<uint16_t *>()[0]),
+                      .minor = ntohs(command.GetData<uint16_t *>()[1])};
         ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
                  this->ver_.minor);
       } else if (command == "_pin") {  // Product Id
-        ESP_LOGI(TAG, "Model: %s", (char *)command.GetData());
+        ESP_LOGI(TAG, "Model: %s", command.GetData<char *>());
       } else if (command == "_top") {  // Topology
-        memcpy(&this->top_, command.GetData(), sizeof(this->top_));
+        memcpy(&this->top_, command.GetData<void *>(), sizeof(this->top_));
         ESP_LOGI(TAG, "Topology: ME(%u), sources(%u)", this->top_.me,
                  this->top_.sources);
 
         // Clear memory
         delete this->prg_inp_;
         delete this->prv_inp_;
-        delete this->trps_;
+        delete this->trst_;
         delete this->aux_inp_;
         delete this->usk_on_air_;
         delete this->dve_;
+        delete this->usk_;
 
         // Allocate buffers
-        this->prg_inp_ = new Source[this->top_.me];
-        this->prv_inp_ = new Source[this->top_.me];
-        this->trps_ = new TransitionPosition[this->top_.me];
-        this->aux_inp_ = new Source[this->top_.aux];
+        this->prg_inp_ = new types::Source[this->top_.me];
+        this->prv_inp_ = new types::Source[this->top_.me];
+        this->trst_ = new types::TransitionState[this->top_.me];
+        this->aux_inp_ = new types::Source[this->top_.aux];
         this->usk_on_air_ = new uint8_t[this->top_.me];
-        this->dve_ = new DveProperties[this->top_.me * this->top_.dve];
+        this->dve_ =
+            new types::UskDveProperties[this->top_.me * this->top_.usk];
+        this->usk_ = new types::UskProperties[this->top_.me * this->top_.usk];
       } else if (command == "AuxS") {  // AUX Select
-        uint8_t channel = ((uint8_t *)command.GetData())[0];
-        Source source = (Source)ntohs(((uint16_t *)command.GetData())[1]);
+        uint8_t channel = command.GetData<uint8_t *>()[0];
+        types::Source source =
+            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
 
         ESP_LOGI(TAG, "New aux: channel: %u source: %u", channel, source);
 
         if (this->aux_inp_ == nullptr || this->top_.aux - 1 < channel) continue;
         this->aux_inp_[channel] = source;
       } else if (command == "InPr") {  // Input Property
-        Source source = (Source)ntohs(((uint16_t *)command.GetData())[0]);
-        InputProperty *inpr = (InputProperty *)malloc(sizeof(InputProperty));
+        types::Source source =
+            (types::Source)ntohs(command.GetData<uint16_t *>()[0]);
+        types::InputProperty *inpr = new types::InputProperty;
 
-        memcpy(inpr->name_long, (uint8_t *)command.GetData() + 2,
+        memcpy(inpr->name_long, command.GetData<uint8_t *>() + 2,
                sizeof(inpr->name_long));
-        memcpy(inpr->name_short, (uint8_t *)command.GetData() + 22,
+        memcpy(inpr->name_short, command.GetData<uint8_t *>() + 22,
                sizeof(inpr->name_short));
 
         // Clean garbage at the end of the string
@@ -262,25 +270,42 @@ void Atem::task_() {
         }
 
         this->input_properties_[source] = inpr;
-      } else if (command == "KeDV") {  // Key properties DVE
-        uint8_t me = ((uint8_t *)command.GetData())[0];
-        uint8_t keyer = ((uint8_t *)command.GetData())[1];
+      } else if (command == "KeBP") {  // Key properties
+        uint8_t me = command.GetData<uint8_t *>()[0];
+        uint8_t keyer = command.GetData<uint8_t *>()[1];
 
         // Check if we have allocated memory for this
         if (this->dve_ == nullptr || this->top_.me - 1 < me ||
-            this->top_.dve - 1 < keyer)
+            this->top_.usk - 1 < keyer)
           continue;
 
-        DveProperties *prop = &this->dve_[me * this->top_.dve + keyer];
-        prop->size_x = ntohl(((uint32_t *)command.GetData())[1]);
-        prop->size_y = ntohl(((uint32_t *)command.GetData())[2]);
-        prop->pos_x = ntohl(((uint32_t *)command.GetData())[3]);
-        prop->pos_y = ntohl(((uint32_t *)command.GetData())[4]);
-        prop->rotation = ntohl(((uint32_t *)command.GetData())[5]);
+        auto prop = &this->usk_[me * this->top_.usk + keyer];
+        prop->type = command.GetData<uint8_t *>()[2];
+        prop->fill = (types::Source)ntohs(command.GetData<uint16_t *>()[3]);
+        prop->key = (types::Source)ntohs(command.GetData<uint16_t *>()[4]);
+        prop->top = ntohs(command.GetData<uint16_t *>()[6]);
+        prop->bottom = ntohs(command.GetData<uint16_t *>()[7]);
+        prop->left = ntohs(command.GetData<uint16_t *>()[8]);
+        prop->right = ntohs(command.GetData<uint16_t *>()[9]);
+      } else if (command == "KeDV") {  // Key properties DVE
+        uint8_t me = command.GetData<uint8_t *>()[0];
+        uint8_t keyer = command.GetData<uint8_t *>()[1];
+
+        // Check if we have allocated memory for this
+        if (this->dve_ == nullptr || this->top_.me - 1 < me ||
+            this->top_.usk - 1 < keyer)
+          continue;
+
+        auto prop = &this->dve_[me * this->top_.usk + keyer];
+        prop->size_x = ntohl(command.GetData<uint32_t *>()[1]);
+        prop->size_y = ntohl(command.GetData<uint32_t *>()[2]);
+        prop->pos_x = ntohl(command.GetData<uint32_t *>()[3]);
+        prop->pos_y = ntohl(command.GetData<uint32_t *>()[4]);
+        prop->rotation = ntohl(command.GetData<uint32_t *>()[5]);
       } else if (command == "KeOn") {  // Key on Air
-        uint8_t me = ((uint8_t *)command.GetData())[0];
-        uint8_t keyer = ((uint8_t *)command.GetData())[1];
-        uint8_t state = ((uint8_t *)command.GetData())[2];
+        uint8_t me = command.GetData<uint8_t *>()[0];
+        uint8_t keyer = command.GetData<uint8_t *>()[1];
+        uint8_t state = command.GetData<uint8_t *>()[2];
 
         ESP_LOGI(TAG, "ME: %u, keyer: %u, air: %u", me, keyer, state);
 
@@ -290,37 +315,55 @@ void Atem::task_() {
         this->usk_on_air_[me] &= ~(0x1 << keyer);
         this->usk_on_air_[me] |= (state << keyer);
       } else if (command == "PrgI") {  // Program Input
-        uint8_t me = ((uint8_t *)command.GetData())[0];
-        Source source = (Source)ntohs(((uint16_t *)command.GetData())[1]);
+        uint8_t me = command.GetData<uint8_t *>()[0];
+        types::Source source =
+            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
 
         ESP_LOGI(TAG, "New program: me: %u source: %u", me, source);
 
         if (this->prg_inp_ == nullptr || this->top_.me - 1 < me) continue;
         this->prg_inp_[me] = source;
       } else if (command == "PrvI") {  // Preview Input
-        uint8_t me = ((uint8_t *)command.GetData())[0];
-        Source source = (Source)ntohs(((uint16_t *)command.GetData())[1]);
+        uint8_t me = command.GetData<uint8_t *>()[0];
+        types::Source source =
+            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
 
         ESP_LOGI(TAG, "New preview: me: %u source: %u", me, source);
 
         if (this->prv_inp_ == nullptr || this->top_.me - 1 < me) continue;
         this->prv_inp_[me] = source;
       } else if (command == "TrPs") {  // Transition Position
-        uint8_t me = ((uint8_t *)command.GetData())[0];
-        uint8_t state = ((uint8_t *)command.GetData())[1];
-        uint16_t pos = ntohs(((uint16_t *)command.GetData())[1]);
+        uint8_t me = command.GetData<uint8_t *>()[0];
+        uint8_t state = command.GetData<uint8_t *>()[1];
+        uint16_t pos = ntohs(command.GetData<uint16_t *>()[2]);
 
-        if (this->trps_ == nullptr || this->top_.me - 1 < me) continue;
-        this->trps_[me].in_transition = (bool)(state & 0x01);
-        this->trps_[me].position = pos;
+        if (this->trst_ == nullptr || this->top_.me - 1 < me) continue;
+        this->trst_[me].in_transition = (bool)(state & 0x01);
+        this->trst_[me].position = pos;
+      } else if (command == "TrSS") {  // Transition State
+        uint8_t me = command.GetData<uint8_t *>()[0];
+
+        if (this->trst_ == nullptr || this->top_.me - 1 < me) continue;
+        this->trst_[me].style = command.GetData<uint8_t *>()[1];
+        this->trst_[me].next = command.GetData<uint8_t *>()[2];
+
+      } else if (command == "VidM") {  // Video Mode
+        uint8_t mode = command.GetData<uint8_t *>()[0];
+
+        ESP_LOGI(TAG, "New video mode: %u", mode);
+      }
+
+      // Send event
+      if (this->state_ == ConnectionState::ACTIVE) {
+        auto cmd = (uint8_t *)command.GetCmd();
+        esp_event_post(ATEM_EVENT,
+                       (cmd[0] << 24) | (cmd[1] << 16) | (cmd[2] << 8) | cmd[3],
+                       command.GetData<void *>(), command.GetLength() - 8,
+                       10 / portTICK_PERIOD_MS);
       }
     }
 
     delete p;
-
-    // Send event
-    if (this->state_ == ConnectionState::ACTIVE)
-      esp_event_post(ATEM_EVENT, 0, nullptr, 0, 10 / portTICK_PERIOD_MS);
   }
 
   vTaskDelete(nullptr);
@@ -342,7 +385,12 @@ void Atem::SendInit_() {
 void Atem::SendCommands(std::initializer_list<AtemCommand *> commands) {
   // Get the length of the commands
   uint16_t length = 12;  // Packet header
-  for (auto c : commands) length += c->GetLength();
+  for (auto c : commands) {
+    if (unlikely(c == nullptr)) continue;
+    length += c->GetLength();
+  }
+
+  if (length == 12) return;  // Don't send empty commands
 
   // Create the packet
   AtemPacket *packet = new AtemPacket(0x1, this->session_id_, length);
@@ -351,6 +399,7 @@ void Atem::SendCommands(std::initializer_list<AtemCommand *> commands) {
   // Copy commands into packet
   uint16_t i = 12;
   for (auto c : commands) {
+    if (unlikely(c == nullptr)) continue;
     memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
     i += c->GetLength();
     delete c;
