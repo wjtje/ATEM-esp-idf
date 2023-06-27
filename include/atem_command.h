@@ -53,6 +53,32 @@ class AtemCommand {
     return (T)((uint8_t *)this->data_ + 8);
   }
   /**
+   * @brief Get the data from the command (excluding the header), short (2
+   * bytes) allinged. This function auto converts from network order to host
+   * order.
+   *
+   * @tparam T
+   * @param i
+   * @return T
+   */
+  template <typename T>
+  T GetDataS(size_t i) {
+    return (T)ntohs(((uint16_t *)this->data_)[4 + i]);
+  }
+  /**
+   * @brief Get the data from the command (excluding the header), long (4
+   * bytes) allinged. This function auto converts from network order to host
+   * order.
+   *
+   * @tparam T
+   * @param i
+   * @return T
+   */
+  template <typename T>
+  T GetDataL(size_t i) {
+    return (T)ntohl(((uint16_t *)this->data_)[2 + i]);
+  }
+  /**
    * @brief Get the access to the raw buffer, use GetLength to get the size of
    * the buffer
    *
@@ -88,6 +114,59 @@ class Cut : public AtemCommand {
  public:
   Cut(uint8_t me = 0) : AtemCommand("DCut", 12) {
     ((uint8_t *)this->data_)[8] = me;
+  }
+};
+
+class DskAuto : public AtemCommand {
+ public:
+  DskAuto(uint8_t keyer) : AtemCommand("DDsA", 12) {
+    // TODO: Depends on protocol version (2.28 and up is this)
+    GetData<uint8_t *>()[1] = keyer;
+  }
+};
+
+class DskOnAir : public AtemCommand {
+ public:
+  DskOnAir(bool state, uint8_t keyer) : AtemCommand("CDsL", 12) {
+    GetData<uint8_t *>()[0] = keyer;
+    GetData<uint8_t *>()[1] = state;
+  }
+};
+
+class DskFill : public AtemCommand {
+ public:
+  DskFill(types::Source source, uint8_t keyer) : AtemCommand("CDsF", 12) {
+    GetData<uint8_t *>()[0] = keyer;
+    GetData<uint16_t *>()[1] = htons(source);
+  }
+};
+
+class DskKey : public AtemCommand {
+ public:
+  DskKey(types::Source source, uint8_t keyer) : AtemCommand("CDsC", 12) {
+    GetData<uint8_t *>()[0] = keyer;
+    GetData<uint16_t *>()[1] = htons(source);
+  }
+};
+
+class DskTie : public AtemCommand {
+ public:
+  DskTie(bool state, uint8_t keyer) : AtemCommand("CDsT", 12) {
+    GetData<uint8_t *>()[0] = keyer;
+    GetData<uint8_t *>()[1] = state;
+  }
+};
+
+class MediaPlayerSource : public AtemCommand {
+ public:
+  MediaPlayerSource(uint8_t mediaplayer, uint8_t mask, uint8_t type,
+                    uint8_t still, uint8_t clip)
+      : AtemCommand("MPSS", 16) {
+    GetData<uint8_t *>()[0] = mask;
+    GetData<uint8_t *>()[1] = mediaplayer;
+    GetData<uint8_t *>()[2] = type;
+    GetData<uint8_t *>()[3] = still;
+    GetData<uint8_t *>()[4] = clip;
   }
 };
 

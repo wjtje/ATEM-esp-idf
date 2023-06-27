@@ -7,9 +7,9 @@ namespace atem {
 
 class AtemPacket {
  public:
-  AtemPacket(pbuf* p);
+  AtemPacket(void* dataptr);
   AtemPacket(uint8_t flags, uint16_t session, uint16_t length);
-  ~AtemPacket() { pbuf_free(this->p_); }
+  ~AtemPacket() { free(this->data_); }
 
   /**
    * @brief Get access to the raw data buffer, advance use only
@@ -17,7 +17,6 @@ class AtemPacket {
    * @return void*
    */
   void* GetData() { return this->data_; }
-  pbuf* GetPacketBuffer() { return this->p_; }
   /**
    * @brief Get the flags of the packet
    *
@@ -73,7 +72,6 @@ class AtemPacket {
   Iterator end() { return Iterator(this->data_, this->GetLength()); }
 
  protected:
-  pbuf* p_{nullptr};
   void* data_{nullptr};
 };
 

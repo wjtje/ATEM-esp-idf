@@ -2,16 +2,11 @@
 
 namespace atem {
 
-AtemPacket::AtemPacket(pbuf *p) {
-  this->p_ = p;
-  this->data_ = p->payload;
-}
+AtemPacket::AtemPacket(void *dataptr) { this->data_ = dataptr; }
 
 AtemPacket::AtemPacket(uint8_t flags, uint16_t session, uint16_t length) {
   if (length < 12) length = 12;  // Cap minimal size
-
-  this->p_ = pbuf_alloc(PBUF_TRANSPORT, length, PBUF_RAM);
-  this->data_ = this->p_->payload;
+  this->data_ = malloc(length);
 
   // Clean the header, the rest is for the consumer
   memset(this->data_, 0x0, 12);

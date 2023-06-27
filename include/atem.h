@@ -1,14 +1,15 @@
 #pragma once
 #include <arpa/inet.h>
+#include <esp_console.h>
 #include <esp_event.h>
 #include <esp_log.h>
 #include <freertos/task.h>
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
-#include <lwip/udp.h>
 
 #include <map>
 #include <utility>
+#include <vector>
 
 #include "atem_command.h"
 #include "atem_packet.h"
@@ -16,8 +17,6 @@
 #include "config_manager.h"
 
 namespace atem {
-
-ESP_EVENT_DECLARE_BASE(ATEM_EVENT);
 
 class Atem {
  public:
@@ -37,8 +36,21 @@ class Atem {
    * @return Which source is displayed, returns 0xFFFF when it's invalid
    */
   types::Source GetAuxInput(uint8_t channel = 0) {
-    if (this->aux_inp_ == nullptr) return (types::Source)0xFFFF;
+    if (this->aux_inp_ == nullptr || this->top_.aux - 1 < channel)
+      return (types::Source)0xFFFF;
     return this->aux_inp_[channel];
+  }
+  /**
+   * @brief Get the state of a DSK
+   *
+   * @warning This function can return nullptr when invalid
+   *
+   * @param keyer
+   * @return types::DskState*
+   */
+  types::DskState* GetDskState(uint8_t keyer = 0) {
+    if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) return nullptr;
+    return &this->dsk_[keyer];
   }
   /**
    * @brief Get the map of input properties
@@ -64,16 +76,43 @@ class Atem {
       return (*it).second;
   }
   /**
+   * @brief Get information about how many stills and clip the media player can
+   * hold
+   *
+   * @return types::MediaPlayer
+   */
+  types::MediaPlayer GetMediaPlayer() { return this->mpl_; }
+  /**
+   * @brief Get the access to the active source on a specific mediaplayer
+   *
+   * @param mediaplayer
+   * @return types::MediaPlayerSource
+   */
+  types::MediaPlayerSource GetMediaPlayerSource(uint8_t mediaplayer) {
+    if (this->top_.mediaplayers - 1 < mediaplayer || this->mps_ == nullptr)
+      return (types::MediaPlayerSource){
+          .type = 0, .still_index = 0, .clip_index = 0};
+    return this->mps_[mediaplayer];
+  }
+  /**
    * @brief Get the current preview source active on ME
    *
    * @param me Which ME to use, defaults to 0
    * @return Which source is displayed, returns 0xFFFF when it's invalid
    */
   types::Source GetPreviewInput(uint8_t me = 0) {
-    if (this->prv_inp_ == nullptr || this->top_.me - 1 < me)
+    if (this->me_ == nullptr || this->top_.me - 1 < me)
       return (types::Source)0xFFFF;
-    return this->prv_inp_[me];
+    return this->me_[me].preview;
   }
+  /**
+   * @brief Get the Product Id (model) of the connected atem.
+   *
+   * @warning This is {nullptr} when no atem is connected
+   *
+   * @return char*
+   */
+  char* GetProductId() { return this->pid_; }
   /**
    * @brief Get the current program source active on ME
    *
@@ -81,10 +120,17 @@ class Atem {
    * @return Which source is displayed, returns 0xFFFF when it's invalid
    */
   types::Source GetProgramInput(uint8_t me = 0) {
-    if (this->prg_inp_ == nullptr || this->top_.me - 1 < me)
+    if (this->me_ == nullptr || this->top_.me - 1 < me)
       return (types::Source)0xFFFF;
-    return this->prg_inp_[me];
+    return this->me_[me].program;
   }
+  types::ProtocolVersion GetProtocolVersion() { return this->ver_; }
+  /**
+   * @brief Get the topology of the connected ATEM
+   *
+   * @return types::Topology
+   */
+  types::Topology GetTopology() { return this->top_; }
   /**
    * @brief Get the information about the current transition on a ME
    *
@@ -92,26 +138,10 @@ class Atem {
    * @return const types::TransitionState
    */
   const types::TransitionState GetTransitionState(uint8_t me = 0) {
-    if (this->trst_ == nullptr || this->top_.me - 1 < me)
+    if (this->me_ == nullptr || this->top_.me - 1 < me)
       return (types::TransitionState){
           .in_transition = false, .position = 0, .style = 0, .next = 0};
-    return this->trst_[me];
-  }
-  /**
-   * @brief Get the Usk Dve Properties object
-   *
-   * @warning This can return nullptr when it's invalid
-   *
-   * @param keyer Which keyer to use, default to 0
-   * @param me Which ME to use, default to 0
-   * @return const UskDveProperties*
-   */
-  const types::UskDveProperties* GetUskDveProperties(uint8_t keyer = 0,
-                                                     uint8_t me = 0) {
-    if (this->dve_ == nullptr || this->top_.me - 1 < me ||
-        this->top_.usk - 1 < keyer)
-      return nullptr;
-    return &this->dve_[me * this->top_.usk + keyer];
+    return this->me_[me].trst_;
   }
   /**
    * @brief Get the Usk Properties object
@@ -122,9 +152,8 @@ class Atem {
    * @param me Which ME to use, default to 0
    * @return const types::UskProperties*
    */
-  const types::UskProperties* GetUskProperties(uint8_t keyer = 0,
-                                               uint8_t me = 0) {
-    if (this->dve_ == nullptr || this->top_.me - 1 < me ||
+  const types::UskState* GetUskState(uint8_t keyer = 0, uint8_t me = 0) {
+    if (this->usk_ == nullptr || this->top_.me - 1 < me ||
         this->top_.usk - 1 < keyer)
       return nullptr;
     return &this->usk_[me * this->top_.usk + keyer];
@@ -137,10 +166,10 @@ class Atem {
    * @return Weather the USK is active or not
    */
   bool GetUskOnAir(uint8_t keyer = 0, uint8_t me = 0) {
-    if (this->usk_on_air_ == nullptr || this->top_.me - 1 < me ||
+    if (this->me_ == nullptr || this->top_.me - 1 < me ||
         this->top_.usk - 1 < keyer)
       return false;
-    return this->usk_on_air_[me] & (0x1 << keyer);
+    return this->me_[me].usk_on_air & (0x1 << keyer);
   }
 
   /**
@@ -155,7 +184,7 @@ class Atem {
    *
    * @param commands
    */
-  void SendCommands(std::initializer_list<AtemCommand*> commands);
+  void SendCommands(std::vector<AtemCommand*> commands);
 
  protected:
   Atem();
@@ -168,44 +197,40 @@ class Atem {
   // Config
   class Config : public config_manager::Config {
    public:
-    ip4_addr* GetIp() { return &this->ip_; }
-    uint16_t GetPort() { return this->port_; }
-    uint8_t GetTimeout() { return this->timeout_; }
+    sockaddr* GetAddress() { return (struct sockaddr*)&this->addr_; }
 
    protected:
     esp_err_t Decode_(cJSON* json);
 
-    ip4_addr ip_;
-    uint16_t port_;
-    uint8_t timeout_;
+    sockaddr_in addr_;
   };
   Config config_;
 
-  udp_pcb* udp_;
+  // Repl command
+  static esp_err_t repl_();
+
+  int sockfd_;
 
   // Connection state
   enum class ConnectionState { NOT_CONNECTED, CONNECTED, INITIALIZING, ACTIVE };
   ConnectionState state_{ConnectionState::NOT_CONNECTED};
   uint16_t session_id_;
   uint16_t local_id_{0};
+  uint16_t remote_id_{0};
 
   // ATEM state
   std::map<types::Source, types::InputProperty*> input_properties_;
-  types::Topology top_;
-  types::ProtocolVerion ver_;
-  types::Source* prg_inp_{nullptr};        // Source in program [me]
-  types::Source* prv_inp_{nullptr};        // Source in preview [me]
-  types::Source* aux_inp_{nullptr};        // Source in aux [aux]
-  uint8_t* usk_on_air_{nullptr};           // USK on air [me] (bitmask)
-  types::TransitionState* trst_{nullptr};  // Transition state [me]
-  types::UskDveProperties* dve_{nullptr};  // DVE pr [me * top_.usk * dve]
-  types::UskProperties* usk_{nullptr};     // USK pr [me * top_.usk * usk]
-
-  static void recv_(void* arg, udp_pcb* pcb, pbuf* p, const ip_addr_t* addr,
-                    uint16_t port);
+  types::Topology top_;                     // Topology
+  types::ProtocolVersion ver_;              // Protocol version
+  types::MediaPlayer mpl_;                  // Media player
+  char* pid_{nullptr};                      // Product Id
+  types::MixEffectState* me_{nullptr};      // [me]
+  types::UskState* usk_{nullptr};           // [me * top_.usk + keyer]
+  types::DskState* dsk_{nullptr};           // [keyer]
+  types::Source* aux_inp_{nullptr};         // Source in aux [aux]
+  types::MediaPlayerSource* mps_{nullptr};  // Media player source
 
   TaskHandle_t task_handle_;
-  QueueHandle_t task_queue_;
   void task_();
 
   /**
@@ -214,8 +239,9 @@ class Atem {
    *
    * @param packet
    */
-  void SendPacket_(AtemPacket* packet);
+  esp_err_t SendPacket_(AtemPacket* packet);
   void SendInit_();
+  void ParseCommand_(AtemCommand command);
 };
 
 }  // namespace atem

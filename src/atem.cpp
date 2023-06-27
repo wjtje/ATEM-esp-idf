@@ -2,7 +2,6 @@
 
 namespace atem {
 
-ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
 const char *TAG{"ATEM"};
 Atem *Atem::instance_{nullptr};
 SemaphoreHandle_t Atem::mutex_ = xSemaphoreCreateMutex();
@@ -20,16 +19,15 @@ esp_err_t Atem::Config::Decode_(cJSON *json) {
   cJSON_GetObjectCheck(json, atem, Object);
 
   cJSON_GetObjectCheck(atem_obj, ip, String);
-  if (!ip4addr_aton(ip_obj->valuestring, &this->ip_)) {
+  if (!ip4addr_aton(ip_obj->valuestring, (ip4_addr_t *)&this->addr_.sin_addr)) {
     ESP_LOGE(TAG, "Expected key 'ip' to be a valid ip4 adress");
     return ESP_FAIL;
   }
 
   cJSON_GetObjectCheck(atem_obj, port, Number);
-  this->port_ = (uint16_t)(port_obj->valueint);
+  this->addr_.sin_port = htons(port_obj->valueint);
 
-  cJSON_GetObjectCheck(atem_obj, timeout, Number);
-  this->timeout_ = (uint8_t)(timeout_obj->valueint);
+  this->addr_.sin_family = AF_INET;
 
   return ESP_OK;
 }
@@ -38,53 +36,45 @@ Atem::Atem() {
   ESP_ERROR_CHECK_WITHOUT_ABORT(
       config_manager::ConfigManager::Restore(&this->config_));
 
-  // Allocate udp
-  this->udp_ = udp_new();
-  if (unlikely(this->udp_ == nullptr)) {
-    ESP_LOGE(TAG, "Failed to alloc memory for udp connection");
-    abort();
+  // Create socket
+  int status;
+  this->sockfd_ = socket(AF_UNSPEC, SOCK_DGRAM, AF_INET);
+  if ((status = connect(this->sockfd_, this->config_.GetAddress(),
+                        sizeof *this->config_.GetAddress())) != 0) {
+    ESP_LOGE(TAG, "Failed to connect to adress (%s)", strerror(status));
   }
 
-  // Register udp callback
-  udp_recv(this->udp_, this->recv_, this);
-
-  // Connect to ATEM
-  ESP_ERROR_CHECK_WITHOUT_ABORT(
-      udp_connect(this->udp_, this->config_.GetIp(), this->config_.GetPort()));
-
-  // Allocate queue
-  this->task_queue_ = xQueueCreate(10, sizeof(pbuf *));
-  if (unlikely(this->task_queue_ == nullptr)) {
-    ESP_LOGE(TAG, "Failed to allocate queue");
-    abort();
+  // Set socket timeout
+  struct timeval timeout;
+  timeout.tv_sec = 4;
+  timeout.tv_usec = 0;
+  if ((status = setsockopt(this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                           sizeof timeout)) != 0) {
+    ESP_LOGE(TAG, "Failed to setsockopt (%s)", strerror(status));
   }
 
   // Create background task
   if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem", 4096,
-                            this, 8, &this->task_handle_))) {
+                            this, configMAX_PRIORITIES, &this->task_handle_))) {
     ESP_LOGE(TAG, "Failed to create task");
     abort();
   }
 
   this->SendInit_();
+
+  // Register repl
+  ESP_ERROR_CHECK_WITHOUT_ABORT(this->repl_());
 }
 
 Atem::~Atem() {
   vTaskDelete(this->task_handle_);
 
-  AtemPacket *p;
-  while (xQueueReceive(this->task_queue_, &p, 1)) delete p;
-
-  udp_remove(this->udp_);
-
   // Clear memory
-  delete this->prg_inp_;
-  delete this->prv_inp_;
-  delete this->trst_;
-  delete this->aux_inp_;
-  delete this->usk_on_air_;
-  delete this->dve_;
+  delete this->pid_;
+  delete this->me_;
   delete this->usk_;
+  delete this->aux_inp_;
+  delete this->mps_;
 
   auto itr = this->input_properties_.begin();
   while (itr != this->input_properties_.end()) {
@@ -94,159 +84,173 @@ Atem::~Atem() {
   }
 }
 
-void Atem::recv_(void *arg, udp_pcb *pcb, pbuf *p, const ip_addr_t *addr,
-                 uint16_t port) {
-  auto packet = new AtemPacket(p);
-
-  if (packet->GetLength() != p->len) {  // Check Length
-    ESP_LOGW(TAG, "Received package with invalid size (%u instead of %u)",
-             p->len, packet->GetLength());
-    delete packet;
-    return;
-  }
-
-  if (((Atem *)arg)->state_ == ConnectionState::ACTIVE &&
-      packet->GetSessionId() != ((Atem *)arg)->session_id_) {
-    ESP_LOGW(TAG,
-             "Received package with invalid session (%02x instead of %02x)",
-             packet->GetSessionId(), ((Atem *)arg)->session_id_);
-    delete packet;
-    return;
-  }
-
-  if (packet->GetFlags() & 0x2 &&
-      ((Atem *)arg)->state_ != ConnectionState::ACTIVE) {  // INIT
-    ESP_LOGD(TAG, "Received INIT");
-    uint8_t init_status = ((const uint8_t *)packet->GetData())[12];
-
-    if (init_status == 0x2) {  // INIT accepted
-      ((Atem *)arg)->state_ = ConnectionState::INITIALIZING;
-      AtemPacket *p = new AtemPacket(0x10, packet->GetSessionId(), 12);
-      ((Atem *)arg)->SendPacket_(p);
-      delete p;
-    } else if (init_status == 0x3) {  // No connection available
-      ESP_LOGW(TAG,
-               "Couldn't connect to the atem because it has no connection "
-               "slot available");
-    } else {
-      ESP_LOGW(TAG, "Received an unknown INIT status (%02x)", init_status);
-    }
-  }
-
-  if (((Atem *)arg)->state_ == ConnectionState::INITIALIZING &&
-      packet->GetFlags() & 0x1 &&
-      packet->GetLength() == 12) {  // INIT packages done
-    // TODO: Check for missing INIT packages
-    ESP_LOGI(TAG, "Initialization done");
-    ((Atem *)arg)->session_id_ = packet->GetSessionId();
-    ((Atem *)arg)->state_ = ConnectionState::ACTIVE;
-    // Send event (because we didn't do that while initializing)
-    esp_event_post(ATEM_EVENT, 0, nullptr, 0, 10 / portTICK_PERIOD_MS);
-  }
-
-  if (packet->GetFlags() & 0x1 &&
-      ((Atem *)arg)->state_ == ConnectionState::ACTIVE) {  // ACK
-    ESP_LOGD(TAG, "-> ACK %u", packet->GetRemoteId());
-    // Respond to ACK
-    AtemPacket *p = new AtemPacket(0x10, packet->GetSessionId(), 12);
-    p->SetAckId(packet->GetRemoteId());
-    ((Atem *)arg)->SendPacket_(p);
-    delete p;
-  }
-
-  if (packet->GetFlags() & 0x8 &&
-      ((Atem *)arg)->state_ == ConnectionState::ACTIVE) {  // RESEND
-    ESP_LOGW(TAG, "<- Resend request for %u", packet->GetResendId());
-    // We don't actually save the messages, just pretend that it was an ACK
-    AtemPacket *p = new AtemPacket(0x1, packet->GetSessionId(), 12);
-    p->SetLocalId(packet->GetResendId());
-    ((Atem *)arg)->SendPacket_(p);
-    delete p;
-  }
-
-  // Add to task queue
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  if (!xQueueSendFromISR(((Atem *)arg)->task_queue_, (void *)(&packet),
-                         &xHigherPriorityTaskWoken)) {
-    ESP_LOGE(TAG, "Failed to add package to queue");
-    delete packet;
-    return;
-  }
-
-  if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
-  return;
-}
-
 void Atem::task_() {
-  AtemPacket *p;
+  AtemPacket *packet = new AtemPacket(malloc(CONFIG_PACKET_BUFFER_SIZE));
+  bool send_ack = false;
 
   for (;;) {
-    // Wait for package or timeout
-    if (!xQueueReceive(
-            this->task_queue_, &p,
-            (this->config_.GetTimeout() * 1000) / portTICK_PERIOD_MS)) {
-      ESP_LOGW(TAG, "Timeout, didn't receive anything for the last %ums",
-               (this->config_.GetTimeout() * 1000));
-      // Reset local variables
-      this->local_id_ = 0;
-      this->SendInit_();
+    int len =
+        recv(this->sockfd_, packet->GetData(), CONFIG_PACKET_BUFFER_SIZE, 0);
+
+    // Something went wrong
+    if (len < 0) {
+      if (errno != EAGAIN) {
+        ESP_LOGE(TAG, "recv error: %s (%i)", strerror(errno), errno);
+        continue;
+      }
+
+      if (send_ack) {  // Already send request once, didn't get response
+        this->SendInit_();
+        continue;
+      }
+
+      // Send ACK-RESPONSE to test connection
+      packet = new AtemPacket(0x11, this->session_id_, 12);
+      packet->SetRemoteId(++this->local_id_);
+      packet->SetAckId(this->remote_id_);
+      this->SendPacket_(packet);
+      delete packet;
+
+      send_ack = true;
+      continue;
+    }
+    send_ack = false;
+
+    // Check Length
+    if (packet->GetLength() != len) {
+      ESP_LOGW(TAG, "Received package with invalid size (%u instead of %u)",
+               len, packet->GetLength());
       continue;
     }
 
-    uint16_t len = p->GetLength();
+    // Check session id
+    if (this->state_ == ConnectionState::ACTIVE &&
+        packet->GetSessionId() != this->session_id_) {
+      ESP_LOGW(TAG,
+               "Received package with invalid session (%02x instead of %02x)",
+               packet->GetSessionId(), this->session_id_);
+      continue;
+    }
+
+    // INIT packet
+    if (packet->GetFlags() & 0x2 && this->state_ != ConnectionState::ACTIVE) {
+      ESP_LOGD(TAG, "Received INIT");
+      uint8_t init_status = ((const uint8_t *)packet->GetData())[12];
+
+      if (init_status == 0x2) {  // INIT accepted
+        this->local_id_ = 0;
+        this->remote_id_ = 0;
+        this->state_ = ConnectionState::INITIALIZING;
+        AtemPacket *p = new AtemPacket(0x10, packet->GetSessionId(), 12);
+        this->SendPacket_(p);
+        delete p;
+      } else if (init_status == 0x3) {  // No connection available
+        ESP_LOGW(TAG,
+                 "Couldn't connect to the atem because it has no connection "
+                 "slot available");
+      } else {
+        ESP_LOGW(TAG, "Received an unknown INIT status (%02x)", init_status);
+      }
+    }
+
+    // INIT packages complete
+    if (this->state_ == ConnectionState::INITIALIZING &&
+        packet->GetFlags() & 0x1 && packet->GetLength() == 12) {
+      // TODO: Check for missing INIT packages
+      ESP_LOGI(TAG, "Initialization done");
+      this->session_id_ = packet->GetSessionId();
+      this->state_ = ConnectionState::ACTIVE;
+    }
+
+    // ACK
+    if (packet->GetFlags() & 0x1 && this->state_ == ConnectionState::ACTIVE) {
+      this->remote_id_ = packet->GetRemoteId();
+      ESP_LOGD(TAG, "-> ACK %u", this->remote_id_);
+      // Respond to ACK
+      AtemPacket *p = new AtemPacket(0x10, packet->GetSessionId(), 12);
+      p->SetAckId(this->remote_id_);
+      this->SendPacket_(p);
+      delete p;
+    }
+
+    // RESEND request
+    if (packet->GetFlags() & 0x8 && this->state_ == ConnectionState::ACTIVE) {
+      ESP_LOGW(TAG, "<- Resend request for %u", packet->GetResendId());
+      // We don't actually save the messages, just pretend that it was an ACK
+      AtemPacket *p = new AtemPacket(0x1, packet->GetSessionId(), 12);
+      p->SetRemoteId(packet->GetResendId());
+      this->SendPacket_(p);
+      delete p;
+    }
 
     // Check size of packet
-    if (len <= 12 || p->GetFlags() & 0x2) {
-      delete p;
-      continue;
-    }
+    if (len <= 12 || packet->GetFlags() & 0x2) continue;
 
     // Parse packet
     ESP_LOGD(TAG, "Got packet with %u bytes", len);
 
-    for (auto command : *p) {
-      if (command == "_ver") {  // Protocol version
+    for (auto command : *packet) {
+      if (command == "_mpl") {  // Media Player
+        this->mpl_.still = command.GetData<uint8_t *>()[0];
+        this->mpl_.clip = command.GetData<uint8_t *>()[1];
+      } else if (command == "_ver") {  // Protocol version
         this->ver_ = {.major = ntohs(command.GetData<uint16_t *>()[0]),
                       .minor = ntohs(command.GetData<uint16_t *>()[1])};
         ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
                  this->ver_.minor);
       } else if (command == "_pin") {  // Product Id
-        ESP_LOGI(TAG, "Model: %s", command.GetData<char *>());
+        delete this->pid_;
+        size_t len = strlen(command.GetData<char *>()) + 1;
+        this->pid_ = new char[len];
+        memcpy(this->pid_, command.GetData<char *>(), len);
+        ESP_LOGI(TAG, "Model: %s", this->pid_);
       } else if (command == "_top") {  // Topology
         memcpy(&this->top_, command.GetData<void *>(), sizeof(this->top_));
         ESP_LOGI(TAG, "Topology: ME(%u), sources(%u)", this->top_.me,
                  this->top_.sources);
 
         // Clear memory
-        delete this->prg_inp_;
-        delete this->prv_inp_;
-        delete this->trst_;
-        delete this->aux_inp_;
-        delete this->usk_on_air_;
-        delete this->dve_;
+        delete this->me_;
         delete this->usk_;
+        delete this->dsk_;
+        delete this->aux_inp_;
+        delete this->mps_;
 
         // Allocate buffers
-        this->prg_inp_ = new types::Source[this->top_.me];
-        this->prv_inp_ = new types::Source[this->top_.me];
-        this->trst_ = new types::TransitionState[this->top_.me];
+        this->me_ = new types::MixEffectState[this->top_.me];
+        this->usk_ = new types::UskState[this->top_.me * this->top_.usk];
+        this->dsk_ = new types::DskState[this->top_.dsk];
         this->aux_inp_ = new types::Source[this->top_.aux];
-        this->usk_on_air_ = new uint8_t[this->top_.me];
-        this->dve_ =
-            new types::UskDveProperties[this->top_.me * this->top_.usk];
-        this->usk_ = new types::UskProperties[this->top_.me * this->top_.usk];
+        this->mps_ = new types::MediaPlayerSource[this->top_.mediaplayers];
       } else if (command == "AuxS") {  // AUX Select
         uint8_t channel = command.GetData<uint8_t *>()[0];
-        types::Source source =
-            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
-
-        ESP_LOGI(TAG, "New aux: channel: %u source: %u", channel, source);
-
         if (this->aux_inp_ == nullptr || this->top_.aux - 1 < channel) continue;
-        this->aux_inp_[channel] = source;
+
+        this->aux_inp_[channel] =
+            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
+      } else if (command == "DskB") {  // DSK Source
+        uint8_t keyer = command.GetData<uint8_t *>()[0];
+        if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) continue;
+
+        this->dsk_[keyer].fill =
+            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
+        this->dsk_[keyer].key =
+            (types::Source)ntohs(command.GetData<uint16_t *>()[2]);
+      } else if (command == "DskP") {  // DSK Properties
+        uint8_t keyer = command.GetData<uint8_t *>()[0];
+        if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) continue;
+
+        this->dsk_[keyer].tie = command.GetData<uint8_t *>()[1];
+      } else if (command == "DskS") {  // DSK State
+        uint8_t keyer = command.GetData<uint8_t *>()[0];
+        if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) continue;
+
+        this->dsk_[keyer].on_air = command.GetData<uint8_t *>()[1];
+        this->dsk_[keyer].in_transition = command.GetData<uint8_t *>()[2];
+        this->dsk_[keyer].is_auto_transitioning =
+            command.GetData<uint8_t *>()[3];
       } else if (command == "InPr") {  // Input Property
-        types::Source source =
-            (types::Source)ntohs(command.GetData<uint16_t *>()[0]);
+        auto source = command.GetDataS<types::Source>(0);
         types::InputProperty *inpr = new types::InputProperty;
 
         memcpy(inpr->name_long, command.GetData<uint8_t *>() + 2,
@@ -275,7 +279,7 @@ void Atem::task_() {
         uint8_t keyer = command.GetData<uint8_t *>()[1];
 
         // Check if we have allocated memory for this
-        if (this->dve_ == nullptr || this->top_.me - 1 < me ||
+        if (this->usk_ == nullptr || this->top_.me - 1 < me ||
             this->top_.usk - 1 < keyer)
           continue;
 
@@ -292,11 +296,11 @@ void Atem::task_() {
         uint8_t keyer = command.GetData<uint8_t *>()[1];
 
         // Check if we have allocated memory for this
-        if (this->dve_ == nullptr || this->top_.me - 1 < me ||
+        if (this->usk_ == nullptr || this->top_.me - 1 < me ||
             this->top_.usk - 1 < keyer)
           continue;
 
-        auto prop = &this->dve_[me * this->top_.usk + keyer];
+        auto prop = &this->usk_[me * this->top_.usk + keyer].dve_;
         prop->size_x = ntohl(command.GetData<uint32_t *>()[1]);
         prop->size_y = ntohl(command.GetData<uint32_t *>()[2]);
         prop->pos_x = ntohl(command.GetData<uint32_t *>()[3]);
@@ -307,71 +311,70 @@ void Atem::task_() {
         uint8_t keyer = command.GetData<uint8_t *>()[1];
         uint8_t state = command.GetData<uint8_t *>()[2];
 
-        ESP_LOGI(TAG, "ME: %u, keyer: %u, air: %u", me, keyer, state);
-
-        if (this->usk_on_air_ == nullptr || this->top_.me - 1 < me || keyer > 8)
+        if (this->me_ == nullptr || this->top_.me - 1 < me || keyer > 15)
           continue;
 
-        this->usk_on_air_[me] &= ~(0x1 << keyer);
-        this->usk_on_air_[me] |= (state << keyer);
+        this->me_[me].usk_on_air &= ~(0x1 << keyer);
+        this->me_[me].usk_on_air |= (state << keyer);
+      } else if (command == "MPCE") {  // Media Player Source
+        uint8_t mediaplayer = command.GetData<uint8_t *>()[0];
+        if (this->top_.mediaplayers - 1 < mediaplayer) continue;
+
+        this->mps_[mediaplayer] = {
+            .type = command.GetData<uint8_t *>()[1],
+            .still_index = command.GetData<uint8_t *>()[2],
+            .clip_index = command.GetData<uint8_t *>()[3],
+        };
       } else if (command == "PrgI") {  // Program Input
         uint8_t me = command.GetData<uint8_t *>()[0];
-        types::Source source =
-            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
-
-        ESP_LOGI(TAG, "New program: me: %u source: %u", me, source);
-
-        if (this->prg_inp_ == nullptr || this->top_.me - 1 < me) continue;
-        this->prg_inp_[me] = source;
+        if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
+        this->me_[me].program = command.GetDataS<types::Source>(1);
       } else if (command == "PrvI") {  // Preview Input
         uint8_t me = command.GetData<uint8_t *>()[0];
-        types::Source source =
-            (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
-
-        ESP_LOGI(TAG, "New preview: me: %u source: %u", me, source);
-
-        if (this->prv_inp_ == nullptr || this->top_.me - 1 < me) continue;
-        this->prv_inp_[me] = source;
+        if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
+        this->me_[me].preview = command.GetDataS<types::Source>(1);
       } else if (command == "TrPs") {  // Transition Position
         uint8_t me = command.GetData<uint8_t *>()[0];
         uint8_t state = command.GetData<uint8_t *>()[1];
         uint16_t pos = ntohs(command.GetData<uint16_t *>()[2]);
 
-        if (this->trst_ == nullptr || this->top_.me - 1 < me) continue;
-        this->trst_[me].in_transition = (bool)(state & 0x01);
-        this->trst_[me].position = pos;
+        if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
+        this->me_[me].trst_.in_transition = (bool)(state & 0x01);
+        this->me_[me].trst_.position = pos;
       } else if (command == "TrSS") {  // Transition State
         uint8_t me = command.GetData<uint8_t *>()[0];
 
-        if (this->trst_ == nullptr || this->top_.me - 1 < me) continue;
-        this->trst_[me].style = command.GetData<uint8_t *>()[1];
-        this->trst_[me].next = command.GetData<uint8_t *>()[2];
+        if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
+        this->me_[me].trst_.style = command.GetData<uint8_t *>()[1];
+        this->me_[me].trst_.next = command.GetData<uint8_t *>()[2];
 
-      } else if (command == "VidM") {  // Video Mode
-        uint8_t mode = command.GetData<uint8_t *>()[0];
-
-        ESP_LOGI(TAG, "New video mode: %u", mode);
-      }
-
-      // Send event
-      if (this->state_ == ConnectionState::ACTIVE) {
-        auto cmd = (uint8_t *)command.GetCmd();
-        esp_event_post(ATEM_EVENT,
-                       (cmd[0] << 24) | (cmd[1] << 16) | (cmd[2] << 8) | cmd[3],
-                       command.GetData<void *>(), command.GetLength() - 8,
-                       10 / portTICK_PERIOD_MS);
+        ESP_LOGD(TAG, "Transition State: me: %u style: %u next: %u", me,
+                 this->me_[me].trst_.style, this->me_[me].trst_.next);
+      } else {  // Unkown command e.g. not implemented
+        ESP_LOGV(TAG, "Received unknown command: '%.4s'",
+                 (char *)command.GetCmd());
+        ESP_LOG_BUFFER_HEXDUMP(TAG, command.GetRawData(), command.GetLength(),
+                               ESP_LOG_VERBOSE);
       }
     }
-
-    delete p;
   }
 
+  // TODO: We should delete packet, but cant because the buffer is not in HEAP
   vTaskDelete(nullptr);
 }
 
-void Atem::SendPacket_(AtemPacket *packet) {
-  ESP_ERROR_CHECK_WITHOUT_ABORT(
-      udp_send(this->udp_, packet->GetPacketBuffer()));
+esp_err_t Atem::SendPacket_(AtemPacket *packet) {
+  ESP_LOGD(TAG, "Sending packet with id: %u and len: %u", packet->GetRemoteId(),
+           packet->GetLength());
+  ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
+                         ESP_LOG_VERBOSE);
+
+  int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
+  if (len != packet->GetLength()) {
+    ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetRemoteId());
+    return ESP_FAIL;
+  }
+  return ESP_OK;
 }
 
 void Atem::SendInit_() {
@@ -380,17 +383,22 @@ void Atem::SendInit_() {
   ((uint8_t *)p->GetData())[12] = 0x01;
   this->SendPacket_(p);
   delete p;
+
+  ESP_LOGD(TAG, "Send init request");
 }
 
-void Atem::SendCommands(std::initializer_list<AtemCommand *> commands) {
+void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   // Get the length of the commands
   uint16_t length = 12;  // Packet header
+  uint16_t amount = 0;
   for (auto c : commands) {
     if (unlikely(c == nullptr)) continue;
     length += c->GetLength();
+    amount++;
   }
 
   if (length == 12) return;  // Don't send empty commands
+  ESP_LOGD(TAG, "Sending %u commands", amount);
 
   // Create the packet
   AtemPacket *packet = new AtemPacket(0x1, this->session_id_, length);

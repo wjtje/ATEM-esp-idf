@@ -106,11 +106,6 @@ struct InputProperty {
   char name_short[5];
 };
 
-struct ProtocolVerion {
-  uint16_t major;
-  uint16_t minor;
-};
-
 struct TransitionState {
   bool in_transition;
   uint16_t position;
@@ -133,16 +128,6 @@ struct Topology {
   uint8_t supersources;
 };
 
-struct UskProperties {
-  uint8_t type;
-  types::Source fill;
-  types::Source key;
-  int16_t top;
-  int16_t bottom;
-  int16_t left;
-  int16_t right;
-};
-
 struct UskDveProperties {
   int size_x;
   int size_y;
@@ -156,6 +141,44 @@ enum class UskDveProperty { SIZE_X, SIZE_Y, POS_X, POS_Y, ROTATION };
 struct ProtocolVersion {
   uint16_t major;
   uint16_t minor;
+};
+
+struct MediaPlayer {
+  uint8_t still;
+  uint8_t clip;
+};
+
+struct MediaPlayerSource {
+  uint8_t type;
+  uint8_t still_index;
+  uint8_t clip_index;
+};
+
+struct MixEffectState {
+  Source program;
+  Source preview;
+  uint16_t usk_on_air;
+  TransitionState trst_;
+};
+
+struct UskState {
+  uint8_t type;
+  Source fill;
+  Source key;
+  int16_t top;
+  int16_t bottom;
+  int16_t left;
+  int16_t right;
+  UskDveProperties dve_;
+};
+
+struct DskState {
+  bool on_air;
+  bool tie;
+  bool in_transition;
+  bool is_auto_transitioning;
+  Source fill;
+  Source key;
 };
 
 }  // namespace types

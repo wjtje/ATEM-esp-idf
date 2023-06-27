@@ -1,0 +1,7 @@
+menu "ATEM Communication"
+
+  config PACKET_BUFFER_SIZE
+    int "Size of the internal buffer to store a packet"
+    default 1600
+
+endmenu
