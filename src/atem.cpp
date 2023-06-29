@@ -60,7 +60,7 @@ Atem::Atem() {
     abort();
   }
 
-  this->SendInit_();
+  this->Reconnect_();
 
   // Register repl
   ESP_ERROR_CHECK_WITHOUT_ABORT(this->repl_());
@@ -76,6 +76,11 @@ Atem::~Atem() {
   delete this->aux_inp_;
   delete this->mps_;
 
+  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
+  for (auto p : this->send_packets_) delete p.second;
+  this->send_packets_.clear();
+  xSemaphoreGive(this->send_mutex_);
+
   auto itr = this->input_properties_.begin();
   while (itr != this->input_properties_.end()) {
     types::InputProperty *i = itr->second;
@@ -85,12 +90,13 @@ Atem::~Atem() {
 }
 
 void Atem::task_() {
-  AtemPacket *packet = new AtemPacket(malloc(CONFIG_PACKET_BUFFER_SIZE));
-  bool send_ack = false;
+  char buffer[CONFIG_PACKET_BUFFER_SIZE];
+  AtemPacket packet(buffer);
+  int ack_count = 0;
 
   for (;;) {
     int len =
-        recv(this->sockfd_, packet->GetData(), CONFIG_PACKET_BUFFER_SIZE, 0);
+        recv(this->sockfd_, packet.GetData(), CONFIG_PACKET_BUFFER_SIZE, 0);
 
     // Something went wrong
     if (len < 0) {
@@ -99,49 +105,52 @@ void Atem::task_() {
         continue;
       }
 
-      if (send_ack) {  // Already send request once, didn't get response
-        this->SendInit_();
+      if (ack_count > 10) {  // Already send multiple ACK requests
+        this->Reconnect_();
         continue;
       }
 
       // Send ACK-RESPONSE to test connection
-      packet = new AtemPacket(0x11, this->session_id_, 12);
-      packet->SetRemoteId(++this->local_id_);
-      packet->SetAckId(this->remote_id_);
-      this->SendPacket_(packet);
-      delete packet;
+      if (this->Connected()) {
+        auto p = new AtemPacket(0x11, this->session_id_, 12);
+        p->SetId(++this->local_id_);
+        p->SetAckId(this->remote_id_);
+        this->SendPacket_(p);
+        delete p;
+      }
 
-      send_ack = true;
+      ack_count++;
       continue;
     }
-    send_ack = false;
+
+    ack_count = 0;
 
     // Check Length
-    if (packet->GetLength() != len) {
-      ESP_LOGW(TAG, "Received package with invalid size (%u instead of %u)",
-               len, packet->GetLength());
+    if (packet.GetLength() != len) {
+      ESP_LOGW(TAG, "Received packet with invalid size (%u instead of %u)", len,
+               packet.GetLength());
       continue;
     }
 
     // Check session id
     if (this->state_ == ConnectionState::ACTIVE &&
-        packet->GetSessionId() != this->session_id_) {
+        packet.GetSessionId() != this->session_id_) {
       ESP_LOGW(TAG,
-               "Received package with invalid session (%02x instead of %02x)",
-               packet->GetSessionId(), this->session_id_);
+               "Received packet with invalid session (%02x instead of %02x)",
+               packet.GetSessionId(), this->session_id_);
       continue;
     }
 
     // INIT packet
-    if (packet->GetFlags() & 0x2 && this->state_ != ConnectionState::ACTIVE) {
+    if (packet.GetFlags() & 0x2 && this->state_ != ConnectionState::ACTIVE) {
       ESP_LOGD(TAG, "Received INIT");
-      uint8_t init_status = ((const uint8_t *)packet->GetData())[12];
+      uint8_t init_status = ((const uint8_t *)packet.GetData())[12];
 
       if (init_status == 0x2) {  // INIT accepted
         this->local_id_ = 0;
         this->remote_id_ = 0;
         this->state_ = ConnectionState::INITIALIZING;
-        AtemPacket *p = new AtemPacket(0x10, packet->GetSessionId(), 12);
+        AtemPacket *p = new AtemPacket(0x10, packet.GetSessionId(), 12);
         this->SendPacket_(p);
         delete p;
       } else if (init_status == 0x3) {  // No connection available
@@ -153,43 +162,91 @@ void Atem::task_() {
       }
     }
 
-    // INIT packages complete
+    // INIT packets complete
     if (this->state_ == ConnectionState::INITIALIZING &&
-        packet->GetFlags() & 0x1 && packet->GetLength() == 12) {
-      // TODO: Check for missing INIT packages
+        packet.GetFlags() & 0x1 && packet.GetLength() == 12) {
       ESP_LOGI(TAG, "Initialization done");
-      this->session_id_ = packet->GetSessionId();
+      this->session_id_ = packet.GetSessionId();
       this->state_ = ConnectionState::ACTIVE;
     }
 
-    // ACK
-    if (packet->GetFlags() & 0x1 && this->state_ == ConnectionState::ACTIVE) {
-      this->remote_id_ = packet->GetRemoteId();
+    // RESEND request
+    if (packet.GetFlags() & 0x8 && this->state_ == ConnectionState::ACTIVE) {
+      ESP_LOGW(TAG, "<- Resend request for %u", packet.GetResendId());
+      bool send = false;
+
+      // Try to find the packet
+      if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
+        if (this->send_packets_.contains(packet.GetAckId())) {
+          this->SendPacket_(this->send_packets_[packet.GetAckId()]);
+          send = true;
+        }
+
+        xSemaphoreGive(this->send_mutex_);
+      }
+
+      // We don't have this packet, just pretend it was an ACK
+      if (!send) {
+        AtemPacket *p = new AtemPacket(0x1, packet.GetSessionId(), 12);
+        p->SetId(packet.GetResendId());
+        this->SendPacket_(p);
+        delete p;
+      }
+    }
+
+    // Check if we are receiving it in order
+    uint16_t missing_id = 0;
+    if (!this->CheckOrder_(packet.GetId(), &missing_id)) {
+      if (missing_id == 0) {
+        ESP_LOGW(TAG, "Received packet %u, but is was already parced",
+                 packet.GetId());
+      } else {
+        ESP_LOGW(TAG, "Missing packet %u, requesting it", missing_id);
+
+        auto p = new AtemPacket(0x8, this->session_id_, 12);
+        p->SetResendId(missing_id);
+        this->SendPacket_(p);
+        delete p;
+      }
+
+      continue;
+    }
+
+    // Send ACK
+    if (packet.GetFlags() & 0x1 && this->state_ == ConnectionState::ACTIVE) {
+      this->remote_id_ = packet.GetId();
       ESP_LOGD(TAG, "-> ACK %u", this->remote_id_);
       // Respond to ACK
-      AtemPacket *p = new AtemPacket(0x10, packet->GetSessionId(), 12);
+      AtemPacket *p = new AtemPacket(0x10, packet.GetSessionId(), 12);
       p->SetAckId(this->remote_id_);
       this->SendPacket_(p);
       delete p;
     }
 
-    // RESEND request
-    if (packet->GetFlags() & 0x8 && this->state_ == ConnectionState::ACTIVE) {
-      ESP_LOGW(TAG, "<- Resend request for %u", packet->GetResendId());
-      // We don't actually save the messages, just pretend that it was an ACK
-      AtemPacket *p = new AtemPacket(0x1, packet->GetSessionId(), 12);
-      p->SetRemoteId(packet->GetResendId());
-      this->SendPacket_(p);
-      delete p;
+    // Receive ACK
+    if (packet.GetFlags() & 0x10 && this->state_ == ConnectionState::ACTIVE) {
+      ESP_LOGD(TAG, "<- ACK %u", packet.GetAckId());
+
+      if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
+        if (this->send_packets_.contains(packet.GetAckId())) {
+          delete this->send_packets_[packet.GetAckId()];
+          this->send_packets_.erase(packet.GetAckId());
+        }
+        xSemaphoreGive(this->send_mutex_);
+      } else {
+        ESP_LOGW(TAG, "Failed to note of ACK");
+      }
     }
 
     // Check size of packet
-    if (len <= 12 || packet->GetFlags() & 0x2) continue;
+    if (len <= 12 || packet.GetFlags() & 0x2) continue;
 
     // Parse packet
     ESP_LOGD(TAG, "Got packet with %u bytes", len);
 
-    for (auto command : *packet) {
+    for (int i = 0; AtemCommand command : packet) {
+      if (++i > 512) break;  // Limit 512 command in a single packet
+
       if (command == "_mpl") {  // Media Player
         this->mpl_.still = command.GetData<uint8_t *>()[0];
         this->mpl_.clip = command.GetData<uint8_t *>()[1];
@@ -359,32 +416,43 @@ void Atem::task_() {
     }
   }
 
-  // TODO: We should delete packet, but cant because the buffer is not in HEAP
   vTaskDelete(nullptr);
 }
 
 esp_err_t Atem::SendPacket_(AtemPacket *packet) {
-  ESP_LOGD(TAG, "Sending packet with id: %u and len: %u", packet->GetRemoteId(),
-           packet->GetLength());
   ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
                          ESP_LOG_VERBOSE);
 
   int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
   if (len != packet->GetLength()) {
-    ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetRemoteId());
+    ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetId());
     return ESP_FAIL;
   }
   return ESP_OK;
 }
 
-void Atem::SendInit_() {
+void Atem::Reconnect_() {
+  ESP_LOGI(TAG, "Reconnecting to ATEM");
+
+  // Reset local variables
   this->state_ = ConnectionState::CONNECTED;
-  AtemPacket *p = new AtemPacket(0x2, 0x0B06, 20);
+  this->local_id_ = 0;
+  this->remote_id_ = 0;
+  this->offset_ = 0;
+  this->received_ = 0xFFFFFFFE;
+  this->session_id_ = 0x0B06;
+
+  // Remove all packets
+  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
+  for (auto p : this->send_packets_) delete p.second;
+  this->send_packets_.clear();
+  xSemaphoreGive(this->send_mutex_);
+
+  // Send init request
+  AtemPacket *p = new AtemPacket(0x2, this->session_id_, 20);
   ((uint8_t *)p->GetData())[12] = 0x01;
   this->SendPacket_(p);
   delete p;
-
-  ESP_LOGD(TAG, "Send init request");
 }
 
 void Atem::SendCommands(std::vector<AtemCommand *> commands) {
@@ -402,7 +470,7 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
 
   // Create the packet
   AtemPacket *packet = new AtemPacket(0x1, this->session_id_, length);
-  packet->SetRemoteId(++this->local_id_);
+  packet->SetId(++this->local_id_);
 
   // Copy commands into packet
   uint16_t i = 12;
@@ -415,7 +483,39 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
 
   // Send the packet
   this->SendPacket_(packet);
-  delete packet;
+
+  // Store packet in send_packets_
+  if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
+    this->send_packets_[this->local_id_] = packet;
+    xSemaphoreGive(this->send_mutex_);
+  } else {
+    ESP_LOGW(TAG, "Failed to store packet");
+    delete packet;
+  }
+}
+
+bool Atem::CheckOrder_(uint16_t id, uint16_t *missing) {
+  // Make room
+  if (this->offset_ < id) {
+    this->received_ <<= (id - this->offset_);
+    this->offset_ = id;
+  }
+
+  // Check if already parced
+  if (this->received_ & 1 << (this->offset_ - id)) return false;
+
+  // Add the id to the received list
+  this->received_ |= 1 << (this->offset_ - id);
+
+  // Check for missing id's
+  if (this->received_ != 0xFFFFFFFF)
+    for (int i = 0; i < sizeof(this->received_) * 8; i++)
+      if (!(this->received_ & 1 << i)) {
+        *missing = this->offset_ - i;
+        return false;
+      }
+
+  return true;
 }
 
 }  // namespace atem

@@ -1,3 +1,12 @@
+/**
+ * @file atem.h
+ * @author Wouter van der Wal (me@wjtje.dev)
+ * @brief Provides the main class that used to communicate to an ATEM.
+ * @version 0.1
+ *
+ * @copyright Copyright (c) 2023 - Wouter van der Wal.
+ *
+ */
 #pragma once
 #include <arpa/inet.h>
 #include <esp_console.h>
@@ -218,6 +227,14 @@ class Atem {
   uint16_t local_id_{0};
   uint16_t remote_id_{0};
 
+  // Check missing packets
+  uint16_t offset_{0};
+  uint32_t received_{0xFFFFFFFE};
+
+  // Packets send
+  SemaphoreHandle_t send_mutex_{xSemaphoreCreateMutex()};
+  std::map<uint16_t, AtemPacket*> send_packets_;
+
   // ATEM state
   std::map<types::Source, types::InputProperty*> input_properties_;
   types::Topology top_;                     // Topology
@@ -240,8 +257,21 @@ class Atem {
    * @param packet
    */
   esp_err_t SendPacket_(AtemPacket* packet);
-  void SendInit_();
-  void ParseCommand_(AtemCommand command);
+  /**
+   * @brief Close current connection, Reset variables, and send INIT request.
+   */
+  void Reconnect_();
+  /**
+   * @brief Checks the order of the packet id's to make sure we are parcing them
+   * in order.
+   *
+   * @param id The id of the received packet
+   * @param missing Where to store the id of the missing packet
+   * @return true The order is correct
+   * @return false The order is incorrect, if there is a pkt missing the id is
+   * stored in missing
+   */
+  bool CheckOrder_(uint16_t id, uint16_t* missing);
 };
 
 }  // namespace atem

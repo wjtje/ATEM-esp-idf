@@ -1,3 +1,13 @@
+/**
+ * @file atem_packet.h
+ * @author Wouter van der Wal (me@wjtje.dev)
+ * @brief Contains function to parse a UDP packet create by an ATEM or create a
+ * valid one.
+ * @version 0.1
+ *
+ * @copyright Copyright (c) 2023 - Wouter van der Wal.
+ *
+ */
 #pragma once
 #include <lwip/udp.h>
 
@@ -5,6 +15,10 @@
 
 namespace atem {
 
+/**
+ * @brief This class is a wrapper for a raw buffer, that can decode ATEM data.
+ *
+ */
 class AtemPacket {
  public:
   AtemPacket(void* dataptr);
@@ -18,7 +32,13 @@ class AtemPacket {
    */
   void* GetData() { return this->data_; }
   /**
-   * @brief Get the flags of the packet
+   * @brief Get the flags of the packet. e.g. What kind of data this packet
+   * contains.
+   *
+   * @note 0x1 - ACK (request)
+   * @note 0x2 - INIT
+   * @note 0x8 - RESEND
+   * @note 0x10 - ACK (response)
    *
    * @return uint8_t
    */
@@ -30,16 +50,31 @@ class AtemPacket {
    * @return uint16_t
    */
   uint16_t GetLength() { return ntohs(*(uint16_t*)this->data_) & 0x07FF; }
+  /**
+   * @brief Get the uniqe ID for this session with the ATEM.
+   *
+   * @return uint16_t
+   */
   uint16_t GetSessionId() { return ntohs(((uint16_t*)this->data_)[1]); }
+  /**
+   * @brief Get the id of the packet that has been ACKed. This is only valid
+   * when this->GetFlags() & 0x10.
+   *
+   * @return uint16_t
+   */
   uint16_t GetAckId() { return ntohs(((uint16_t*)this->data_)[2]); }
+  /**
+   * @brief Get the id of the packet that needs to be resend. This is only
+   * valid when this->GetFlags() & 0x8.
+   *
+   * @return uint16_t
+   */
   uint16_t GetResendId() { return ntohs(((uint16_t*)this->data_)[3]); }
-  uint16_t GetLocalId() { return ntohs(((uint16_t*)this->data_)[4]); }
-  uint16_t GetRemoteId() { return ntohs(((uint16_t*)this->data_)[5]); }
+  uint16_t GetId() { return ntohs(((uint16_t*)this->data_)[5]); }
 
   void SetAckId(uint16_t id) { ((uint16_t*)this->data_)[2] = htons(id); }
   void SetResendId(uint16_t id) { ((uint16_t*)this->data_)[3] = htons(id); }
-  void SetLocalId(uint16_t id) { ((uint16_t*)this->data_)[4] = htons(id); }
-  void SetRemoteId(uint16_t id) { ((uint16_t*)this->data_)[5] = htons(id); }
+  void SetId(uint16_t id) { ((uint16_t*)this->data_)[5] = htons(id); }
 
   struct Iterator {
     Iterator(void* buff, uint16_t i) : buff_(buff), i_(i) {}
@@ -68,6 +103,11 @@ class AtemPacket {
     uint16_t i_;
   };
 
+  /**
+   * @brief Returns an Iterator for all command inside this packet.
+   *
+   * @return Iterator
+   */
   Iterator begin() { return Iterator(this->data_, 12); }
   Iterator end() { return Iterator(this->data_, this->GetLength()); }
 
