@@ -9,7 +9,7 @@
  *
  */
 #pragma once
-#include <lwip/udp.h>
+#include <cstring>
 
 #include "atem_command.h"
 

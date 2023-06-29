@@ -9,10 +9,12 @@
  *
  */
 #pragma once
-#include <lwip/inet.h>
+// #include <lwip/inet.h>
+#include <arpa/inet.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <cstring>
 #include <initializer_list>
 #include <tuple>
 

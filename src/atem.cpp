@@ -3,46 +3,32 @@
 namespace atem {
 
 const char *TAG{"ATEM"};
-Atem *Atem::instance_{nullptr};
-SemaphoreHandle_t Atem::mutex_ = xSemaphoreCreateMutex();
 
-Atem *Atem::GetInstance() {
-  if (xSemaphoreTake(Atem::mutex_, 10 / portTICK_PERIOD_MS)) {
-    if (Atem::instance_ == nullptr) Atem::instance_ = new Atem();
-    xSemaphoreGive(Atem::mutex_);
-    return Atem::instance_;
+Atem::Atem(const char *ip) {
+  int status;
+  struct addrinfo hints, *res;
+
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_DGRAM;
+
+  if ((status = getaddrinfo(ip, "9910", &hints, &res)) != 0) {
+    ESP_LOGE(TAG, "Failed to get address: %s", gai_strerror(status));
+    abort();
   }
-  return nullptr;
-}
-
-esp_err_t Atem::Config::Decode_(cJSON *json) {
-  cJSON_GetObjectCheck(json, atem, Object);
-
-  cJSON_GetObjectCheck(atem_obj, ip, String);
-  if (!ip4addr_aton(ip_obj->valuestring, (ip4_addr_t *)&this->addr_.sin_addr)) {
-    ESP_LOGE(TAG, "Expected key 'ip' to be a valid ip4 adress");
-    return ESP_FAIL;
-  }
-
-  cJSON_GetObjectCheck(atem_obj, port, Number);
-  this->addr_.sin_port = htons(port_obj->valueint);
-
-  this->addr_.sin_family = AF_INET;
-
-  return ESP_OK;
-}
-
-Atem::Atem() {
-  ESP_ERROR_CHECK_WITHOUT_ABORT(
-      config_manager::ConfigManager::Restore(&this->config_));
 
   // Create socket
-  int status;
-  this->sockfd_ = socket(AF_UNSPEC, SOCK_DGRAM, AF_INET);
-  if ((status = connect(this->sockfd_, this->config_.GetAddress(),
-                        sizeof *this->config_.GetAddress())) != 0) {
+  this->sockfd_ = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+  if (this->sockfd_ == -1) {
+    ESP_LOGE(TAG, "Failed to create socket: %s (%u)", strerror(errno), errno);
+    abort();
+  }
+
+  if ((status = connect(this->sockfd_, res->ai_addr, res->ai_addrlen)) != 0) {
     ESP_LOGE(TAG, "Failed to connect to adress (%s)", strerror(status));
   }
+
+  freeaddrinfo(res);
 
   // Set socket timeout
   struct timeval timeout;
@@ -54,20 +40,20 @@ Atem::Atem() {
   }
 
   // Create background task
-  if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem", 4096,
-                            this, configMAX_PRIORITIES, &this->task_handle_))) {
-    ESP_LOGE(TAG, "Failed to create task");
-    abort();
-  }
+  // if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem",
+  // 4096,
+  //                           this, configMAX_PRIORITIES,
+  //                           &this->task_handle_))) {
+  //   ESP_LOGE(TAG, "Failed to create task");
+  //   abort();
+  // }
 
   this->Reconnect_();
-
-  // Register repl
-  ESP_ERROR_CHECK_WITHOUT_ABORT(this->repl_());
+  this->task_();
 }
 
 Atem::~Atem() {
-  vTaskDelete(this->task_handle_);
+  // vTaskDelete(this->task_handle_);
 
   // Clear memory
   delete this->pid_;
@@ -76,10 +62,10 @@ Atem::~Atem() {
   delete this->aux_inp_;
   delete this->mps_;
 
-  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
+  // xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
   for (auto p : this->send_packets_) delete p.second;
   this->send_packets_.clear();
-  xSemaphoreGive(this->send_mutex_);
+  // xSemaphoreGive(this->send_mutex_);
 
   auto itr = this->input_properties_.begin();
   while (itr != this->input_properties_.end()) {
@@ -102,6 +88,7 @@ void Atem::task_() {
     if (len < 0) {
       if (errno != EAGAIN) {
         ESP_LOGE(TAG, "recv error: %s (%i)", strerror(errno), errno);
+        if (errno == EBADF) abort();
         continue;
       }
 
@@ -176,14 +163,14 @@ void Atem::task_() {
       bool send = false;
 
       // Try to find the packet
-      if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
-        if (this->send_packets_.contains(packet.GetAckId())) {
-          this->SendPacket_(this->send_packets_[packet.GetAckId()]);
-          send = true;
-        }
-
-        xSemaphoreGive(this->send_mutex_);
+      // if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
+      if (this->send_packets_.contains(packet.GetAckId())) {
+        this->SendPacket_(this->send_packets_[packet.GetAckId()]);
+        send = true;
       }
+
+      //   xSemaphoreGive(this->send_mutex_);
+      // }
 
       // We don't have this packet, just pretend it was an ACK
       if (!send) {
@@ -227,15 +214,20 @@ void Atem::task_() {
     if (packet.GetFlags() & 0x10 && this->state_ == ConnectionState::ACTIVE) {
       ESP_LOGD(TAG, "<- ACK %u", packet.GetAckId());
 
-      if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
-        if (this->send_packets_.contains(packet.GetAckId())) {
-          delete this->send_packets_[packet.GetAckId()];
-          this->send_packets_.erase(packet.GetAckId());
-        }
-        xSemaphoreGive(this->send_mutex_);
-      } else {
-        ESP_LOGW(TAG, "Failed to note of ACK");
+      if (this->send_packets_.contains(packet.GetAckId())) {
+        delete this->send_packets_[packet.GetAckId()];
+        this->send_packets_.erase(packet.GetAckId());
       }
+
+      // if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
+      //   if (this->send_packets_.contains(packet.GetAckId())) {
+      //     delete this->send_packets_[packet.GetAckId()];
+      //     this->send_packets_.erase(packet.GetAckId());
+      //   }
+      //   xSemaphoreGive(this->send_mutex_);
+      // } else {
+      //   ESP_LOGW(TAG, "Failed to note of ACK");
+      // }
     }
 
     // Check size of packet
@@ -410,18 +402,18 @@ void Atem::task_() {
       } else {  // Unkown command e.g. not implemented
         ESP_LOGV(TAG, "Received unknown command: '%.4s'",
                  (char *)command.GetCmd());
-        ESP_LOG_BUFFER_HEXDUMP(TAG, command.GetRawData(), command.GetLength(),
-                               ESP_LOG_VERBOSE);
+        // ESP_LOG_BUFFER_HEXDUMP(TAG, command.GetRawData(),
+        // command.GetLength(), ESP_LOG_VERBOSE);
       }
     }
   }
 
-  vTaskDelete(nullptr);
+  // vTaskDelete(nullptr);
 }
 
 esp_err_t Atem::SendPacket_(AtemPacket *packet) {
-  ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
-                         ESP_LOG_VERBOSE);
+  // ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
+  //                        ESP_LOG_VERBOSE);
 
   int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
   if (len != packet->GetLength()) {
@@ -443,10 +435,10 @@ void Atem::Reconnect_() {
   this->session_id_ = 0x0B06;
 
   // Remove all packets
-  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
+  // xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
   for (auto p : this->send_packets_) delete p.second;
   this->send_packets_.clear();
-  xSemaphoreGive(this->send_mutex_);
+  // xSemaphoreGive(this->send_mutex_);
 
   // Send init request
   AtemPacket *p = new AtemPacket(0x2, this->session_id_, 20);
@@ -460,7 +452,7 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   uint16_t length = 12;  // Packet header
   uint16_t amount = 0;
   for (auto c : commands) {
-    if (unlikely(c == nullptr)) continue;
+    if (c == nullptr) continue;
     length += c->GetLength();
     amount++;
   }
@@ -475,7 +467,7 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   // Copy commands into packet
   uint16_t i = 12;
   for (auto c : commands) {
-    if (unlikely(c == nullptr)) continue;
+    if (c == nullptr) continue;
     memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
     i += c->GetLength();
     delete c;
@@ -485,13 +477,13 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   this->SendPacket_(packet);
 
   // Store packet in send_packets_
-  if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
-    this->send_packets_[this->local_id_] = packet;
-    xSemaphoreGive(this->send_mutex_);
-  } else {
-    ESP_LOGW(TAG, "Failed to store packet");
-    delete packet;
-  }
+  // if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
+  this->send_packets_[this->local_id_] = packet;
+  //   xSemaphoreGive(this->send_mutex_);
+  // } else {
+  //   ESP_LOGW(TAG, "Failed to store packet");
+  //   delete packet;
+  // }
 }
 
 bool Atem::CheckOrder_(uint16_t id, uint16_t *missing) {

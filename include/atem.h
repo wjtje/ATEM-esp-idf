@@ -9,13 +9,16 @@
  */
 #pragma once
 #include <arpa/inet.h>
-#include <esp_console.h>
-#include <esp_event.h>
-#include <esp_log.h>
-#include <freertos/task.h>
-#include <lwip/netdb.h>
-#include <lwip/sockets.h>
+// #include <esp_log.h>
+// #include <freertos/task.h>
+// #include <lwip/netdb.h>
+#include <netdb.h>
+// #include <lwip/sockets.h>
+#include <stdio.h>
+#include <sys/socket.h>
 
+#include <cerrno>
+#include <cstring>
 #include <map>
 #include <utility>
 #include <vector>
@@ -23,13 +26,33 @@
 #include "atem_command.h"
 #include "atem_packet.h"
 #include "atem_types.h"
-#include "config_manager.h"
+
+#define CONFIG_PACKET_BUFFER_SIZE 1600
+
+// START: define ESP-IDF functions
+#define ESP_LOGE(tag, format, ...) \
+  printf("(E) %s: " format "\n", tag __VA_OPT__(, ) __VA_ARGS__)
+#define ESP_LOGW(tag, format, ...) \
+  printf("(W) %s: " format "\n", tag __VA_OPT__(, ) __VA_ARGS__)
+#define ESP_LOGI(tag, format, ...) \
+  printf("(I) %s: " format "\n", tag __VA_OPT__(, ) __VA_ARGS__)
+#define ESP_LOGD(tag, format, ...) \
+  printf("(D) %s: " format "\n", tag __VA_OPT__(, ) __VA_ARGS__)
+#define ESP_LOGV(tag, format, ...) \
+  printf("(V) %s: " format "\n", tag __VA_OPT__(, ) __VA_ARGS__)
+
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_FAIL -1
+
+// END
 
 namespace atem {
 
 class Atem {
  public:
-  static Atem* GetInstance();
+  Atem(const char* ip);
+  ~Atem();
 
   /**
    * @brief Returns if the atem connection is active or not
@@ -196,28 +219,6 @@ class Atem {
   void SendCommands(std::vector<AtemCommand*> commands);
 
  protected:
-  Atem();
-  ~Atem();
-
-  // Singleton
-  static Atem* instance_;
-  static SemaphoreHandle_t mutex_;
-
-  // Config
-  class Config : public config_manager::Config {
-   public:
-    sockaddr* GetAddress() { return (struct sockaddr*)&this->addr_; }
-
-   protected:
-    esp_err_t Decode_(cJSON* json);
-
-    sockaddr_in addr_;
-  };
-  Config config_;
-
-  // Repl command
-  static esp_err_t repl_();
-
   int sockfd_;
 
   // Connection state
@@ -232,7 +233,7 @@ class Atem {
   uint32_t received_{0xFFFFFFFE};
 
   // Packets send
-  SemaphoreHandle_t send_mutex_{xSemaphoreCreateMutex()};
+  // SemaphoreHandle_t send_mutex_{xSemaphoreCreateMutex()};
   std::map<uint16_t, AtemPacket*> send_packets_;
 
   // ATEM state
@@ -247,7 +248,7 @@ class Atem {
   types::Source* aux_inp_{nullptr};         // Source in aux [aux]
   types::MediaPlayerSource* mps_{nullptr};  // Media player source
 
-  TaskHandle_t task_handle_;
+  // TaskHandle_t task_handle_;
   void task_();
 
   /**
