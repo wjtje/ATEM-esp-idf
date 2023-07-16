@@ -137,6 +137,8 @@ struct Topology {
   uint8_t supersources;
 };
 
+enum class UskDveKeyFrame : uint8_t { A = 1, B, FULL, RUN_TO_INF };
+
 struct UskDveProperties {
   int size_x;
   int size_y;

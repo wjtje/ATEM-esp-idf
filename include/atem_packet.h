@@ -9,7 +9,7 @@
  *
  */
 #pragma once
-#include <lwip/udp.h>
+#include <cstring>
 
 #include "atem_command.h"
 
@@ -60,21 +60,21 @@ class AtemPacket {
    * @brief Get the id of the packet that has been ACKed. This is only valid
    * when this->GetFlags() & 0x10.
    *
-   * @return uint16_t
+   * @return int16_t
    */
-  uint16_t GetAckId() { return ntohs(((uint16_t*)this->data_)[2]); }
+  int16_t GetAckId() { return ntohs(((int16_t*)this->data_)[2]); }
   /**
    * @brief Get the id of the packet that needs to be resend. This is only
    * valid when this->GetFlags() & 0x8.
    *
-   * @return uint16_t
+   * @return int16_t
    */
-  uint16_t GetResendId() { return ntohs(((uint16_t*)this->data_)[3]); }
-  uint16_t GetId() { return ntohs(((uint16_t*)this->data_)[5]); }
+  int16_t GetResendId() { return ntohs(((int16_t*)this->data_)[3]); }
+  int16_t GetId() { return ntohs(((int16_t*)this->data_)[5]); }
 
-  void SetAckId(uint16_t id) { ((uint16_t*)this->data_)[2] = htons(id); }
-  void SetResendId(uint16_t id) { ((uint16_t*)this->data_)[3] = htons(id); }
-  void SetId(uint16_t id) { ((uint16_t*)this->data_)[5] = htons(id); }
+  void SetAckId(int16_t id) { ((int16_t*)this->data_)[2] = htons(id); }
+  void SetResendId(int16_t id) { ((int16_t*)this->data_)[3] = htons(id); }
+  void SetId(int16_t id) { ((int16_t*)this->data_)[5] = htons(id); }
 
   struct Iterator {
     Iterator(void* buff, uint16_t i) : buff_(buff), i_(i) {}

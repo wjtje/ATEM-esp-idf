@@ -228,7 +228,7 @@ class Atem {
   uint16_t remote_id_{0};
 
   // Check missing packets
-  uint16_t offset_{0};
+  int16_t offset_{0};
   uint32_t received_{0xFFFFFFFE};
 
   // Packets send
@@ -267,11 +267,11 @@ class Atem {
    *
    * @param id The id of the received packet
    * @param missing Where to store the id of the missing packet
-   * @return true The order is correct
-   * @return false The order is incorrect, if there is a pkt missing the id is
-   * stored in missing
+   * @return 0 The order is correct
+   * @return 1 The id was already parced
+   * @return 2 A packet is missing, check missing parameter
    */
-  bool CheckOrder_(uint16_t id, uint16_t* missing);
+  int CheckOrder_(int16_t id, int16_t* missing);
 };
 
 }  // namespace atem

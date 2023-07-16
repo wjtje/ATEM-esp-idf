@@ -35,9 +35,19 @@ class AtemCommand {
    * data
    */
   AtemCommand(const char *cmd, uint16_t length);
-  ~AtemCommand();
+  virtual ~AtemCommand();
 
   bool operator==(const char *b) { return !memcmp(this->GetCmd(), b, 4); }
+
+  /**
+   * @brief Prepair the command for sending, this can be used when some protocol
+   * version requires a different syntax.
+   *
+   * This will automaticly be executes when sending commands.
+   *
+   * @param version
+   */
+  virtual void PrepairCommand(types::ProtocolVersion ver) {}
 
   /**
    * @brief Get the length of the command, this include the 8 bytes for the
@@ -106,7 +116,7 @@ namespace cmd {
 class Auto : public AtemCommand {
  public:
   Auto(uint8_t me = 0) : AtemCommand("DAut", 12) {
-    ((uint8_t *)this->data_)[8] = me;
+    GetData<uint8_t *>()[0] = me;
   }
 };
 
@@ -114,25 +124,32 @@ class AuxInput : public AtemCommand {
  public:
   AuxInput(types::Source source, uint8_t channel = 0)
       : AtemCommand("CAuS", 12) {
-    ((uint8_t *)this->data_)[8] = 1;
-    ((uint8_t *)this->data_)[9] = channel;
-    ((uint16_t *)this->data_)[5] = htons(source);
+    GetData<uint8_t *>()[0] = 1;
+    GetData<uint8_t *>()[1] = channel;
+    GetData<uint16_t *>()[1] = htons(source);
   }
 };
 
 class Cut : public AtemCommand {
  public:
   Cut(uint8_t me = 0) : AtemCommand("DCut", 12) {
-    ((uint8_t *)this->data_)[8] = me;
+    GetData<uint8_t *>()[0] = me;
   }
 };
 
 class DskAuto : public AtemCommand {
  public:
-  DskAuto(uint8_t keyer) : AtemCommand("DDsA", 12) {
-    // TODO: Depends on protocol version (2.28 and up is this)
-    GetData<uint8_t *>()[1] = keyer;
+  DskAuto(uint8_t keyer) : AtemCommand("DDsA", 12), keyer_(keyer) {}
+  void PrepairCommand(types::ProtocolVersion ver) override {
+    if (ver.major <= 2 && ver.minor <= 27) {
+      GetData<uint8_t *>()[0] = this->keyer_;
+    } else {
+      GetData<uint8_t *>()[1] = this->keyer_;
+    }
   }
+
+ protected:
+  uint8_t keyer_;
 };
 
 class DskOnAir : public AtemCommand {
@@ -183,8 +200,9 @@ class MediaPlayerSource : public AtemCommand {
 class UskDveKeyFrameProperties : public AtemCommand {
  public:
   UskDveKeyFrameProperties(
+      types::UskDveKeyFrame key_frame,
       std::initializer_list<std::tuple<types::UskDveProperty, int>> p,
-      uint8_t kf = 1, uint8_t keyer = 0, uint8_t me = 0)
+      uint8_t keyer = 0, uint8_t me = 0)
       : AtemCommand("CKFP", 64) {
     uint32_t mask = 0;
 
@@ -194,21 +212,31 @@ class UskDveKeyFrameProperties : public AtemCommand {
       ((uint32_t *)this->data_)[4 + (uint8_t)property] = htonl(value);
     }
 
-    ((uint32_t *)this->data_)[2] = htonl(mask);
-    ((uint8_t *)this->data_)[12] = me;
-    ((uint8_t *)this->data_)[13] = keyer;
-    ((uint8_t *)this->data_)[14] = kf;
+    GetData<uint32_t *>()[0] = htonl(mask);
+    GetData<uint8_t *>()[4] = me;
+    GetData<uint8_t *>()[5] = keyer;
+    GetData<uint8_t *>()[6] = (uint8_t)key_frame;
   }
 };
 
-class UskDveKeyFrameRun : public AtemCommand {
+class UskDveRunFlyingKey : public AtemCommand {
  public:
-  UskDveKeyFrameRun(uint8_t kf = 1, uint8_t keyer = 0, uint8_t me = 0)
+  /**
+   * @brief Construct a new Usk Dve Run Flying Key object
+   *
+   * @param key_frame
+   * @param run_to_inf_i Run to infinite index
+   * @param keyer Which keyer to use
+   * @param me On which me
+   */
+  UskDveRunFlyingKey(types::UskDveKeyFrame key_frame, uint8_t run_to_inf_i = 0,
+                     uint8_t keyer = 0, uint8_t me = 0)
       : AtemCommand("RFlK", 16) {
-    ((uint8_t *)this->data_)[8] = 0;
-    ((uint8_t *)this->data_)[9] = me;
-    ((uint8_t *)this->data_)[10] = keyer;
-    ((uint8_t *)this->data_)[12] = kf;
+    GetData<uint8_t *>()[0] = 0;
+    GetData<uint8_t *>()[1] = me;
+    GetData<uint8_t *>()[2] = keyer;
+    GetData<uint8_t *>()[4] = (uint8_t)key_frame;
+    GetData<uint8_t *>()[5] = run_to_inf_i;
   }
 };
 
@@ -226,9 +254,9 @@ class UskDveProperties : public AtemCommand {
       ((uint32_t *)this->data_)[4 + (uint8_t)property] = htonl(value);
     }
 
-    ((uint32_t *)this->data_)[2] = htonl(mask);
-    ((uint8_t *)this->data_)[12] = me;
-    ((uint8_t *)this->data_)[13] = keyer;
+    GetData<uint32_t *>()[0] = htonl(mask);
+    GetData<uint8_t *>()[4] = me;
+    GetData<uint8_t *>()[5] = keyer;
   }
 };
 
@@ -257,25 +285,25 @@ class UskOnAir : public AtemCommand {
  public:
   UskOnAir(bool enabled, uint8_t key = 0, uint8_t me = 0)
       : AtemCommand("CKOn", 12) {
-    ((uint8_t *)this->data_)[8] = me;
-    ((uint8_t *)this->data_)[9] = key;
-    ((uint8_t *)this->data_)[10] = enabled;
+    GetData<uint8_t *>()[0] = me;
+    GetData<uint8_t *>()[1] = key;
+    GetData<uint8_t *>()[2] = enabled;
   }
 };
 
 class PreviewInput : public AtemCommand {
  public:
   PreviewInput(types::Source source, uint8_t me = 0) : AtemCommand("CPvI", 12) {
-    ((uint8_t *)this->data_)[8] = me;
-    ((uint16_t *)this->data_)[5] = htons(source);
+    GetData<uint8_t *>()[0] = me;
+    GetData<uint16_t *>()[1] = htons(source);
   }
 };
 
 class ProgramInput : public AtemCommand {
  public:
   ProgramInput(types::Source source, uint8_t me = 0) : AtemCommand("CPgI", 12) {
-    ((uint8_t *)this->data_)[8] = me;
-    ((uint16_t *)this->data_)[5] = htons(source);
+    GetData<uint8_t *>()[0] = me;
+    GetData<uint16_t *>()[1] = htons(source);
   }
 };
 
@@ -283,8 +311,8 @@ class TransitionPosition : public AtemCommand {
  public:
   TransitionPosition(uint16_t position, uint8_t me = 0)
       : AtemCommand("CTPs", 12) {
-    ((uint8_t *)this->data_)[8] = me;
-    ((uint16_t *)this->data_)[5] = htons(position);
+    GetData<uint8_t *>()[0] = me;
+    GetData<uint16_t *>()[1] = htons(position);
   }
 };
 

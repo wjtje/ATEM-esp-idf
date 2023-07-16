@@ -165,6 +165,15 @@ void Atem::task_() {
     // INIT packets complete
     if (this->state_ == ConnectionState::INITIALIZING &&
         packet.GetFlags() & 0x1 && packet.GetLength() == 12) {
+      if (this->pid_ != nullptr) {
+        // Show some basic information about the ATEM
+        ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
+                 this->ver_.minor);
+        ESP_LOGI(TAG, "Model: %s", this->pid_);
+        ESP_LOGI(TAG, "Topology: ME(%u), sources(%u)", this->top_.me,
+                 this->top_.sources);
+      }
+
       ESP_LOGI(TAG, "Initialization done");
       this->session_id_ = packet.GetSessionId();
       this->state_ = ConnectionState::ACTIVE;
@@ -195,20 +204,18 @@ void Atem::task_() {
     }
 
     // Check if we are receiving it in order
-    uint16_t missing_id = 0;
-    if (!this->CheckOrder_(packet.GetId(), &missing_id)) {
-      if (missing_id == 0) {
-        ESP_LOGW(TAG, "Received packet %u, but is was already parced",
-                 packet.GetId());
-      } else {
-        ESP_LOGW(TAG, "Missing packet %u, requesting it", missing_id);
+    int16_t missing_id = 0;
+    int order_check = this->CheckOrder_(packet.GetId(), &missing_id);
+    if (order_check == 1) {
+      ESP_LOGW(TAG, "Received packet %u, but is was already parced",
+               packet.GetId());
+    } else if (order_check == 1) {
+      ESP_LOGW(TAG, "Missing packet %u, requesting it", missing_id);
 
-        auto p = new AtemPacket(0x8, this->session_id_, 12);
-        p->SetResendId(missing_id);
-        this->SendPacket_(p);
-        delete p;
-      }
-
+      auto p = new AtemPacket(0x8, this->session_id_, 12);
+      p->SetResendId(missing_id);
+      this->SendPacket_(p);
+      delete p;
       continue;
     }
 
@@ -239,7 +246,7 @@ void Atem::task_() {
     }
 
     // Check size of packet
-    if (len <= 12 || packet.GetFlags() & 0x2) continue;
+    if (len <= 12 || packet.GetFlags() & 0x2 || order_check != 0) continue;
 
     // Parse packet
     ESP_LOGD(TAG, "Got packet with %u bytes", len);
@@ -253,18 +260,13 @@ void Atem::task_() {
       } else if (command == "_ver") {  // Protocol version
         this->ver_ = {.major = ntohs(command.GetData<uint16_t *>()[0]),
                       .minor = ntohs(command.GetData<uint16_t *>()[1])};
-        ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
-                 this->ver_.minor);
       } else if (command == "_pin") {  // Product Id
         delete this->pid_;
         size_t len = strlen(command.GetData<char *>()) + 1;
         this->pid_ = new char[len];
         memcpy(this->pid_, command.GetData<char *>(), len);
-        ESP_LOGI(TAG, "Model: %s", this->pid_);
       } else if (command == "_top") {  // Topology
         memcpy(&this->top_, command.GetData<void *>(), sizeof(this->top_));
-        ESP_LOGI(TAG, "Topology: ME(%u), sources(%u)", this->top_.me,
-                 this->top_.sources);
 
         // Clear memory
         delete this->me_;
@@ -407,11 +409,6 @@ void Atem::task_() {
 
         ESP_LOGD(TAG, "Transition State: me: %u style: %u next: %u", me,
                  this->me_[me].trst_.style, this->me_[me].trst_.next);
-      } else {  // Unkown command e.g. not implemented
-        ESP_LOGV(TAG, "Received unknown command: '%.4s'",
-                 (char *)command.GetCmd());
-        ESP_LOG_BUFFER_HEXDUMP(TAG, command.GetRawData(), command.GetLength(),
-                               ESP_LOG_VERBOSE);
       }
     }
   }
@@ -476,6 +473,7 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   uint16_t i = 12;
   for (auto c : commands) {
     if (unlikely(c == nullptr)) continue;
+    c->PrepairCommand(this->GetProtocolVersion());
     memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
     i += c->GetLength();
     delete c;
@@ -494,28 +492,30 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   }
 }
 
-bool Atem::CheckOrder_(uint16_t id, uint16_t *missing) {
+int Atem::CheckOrder_(int16_t id, int16_t *missing) {
+  // Max id that the ATEM can send is 0x7FFF
+
   // Make room
-  if (this->offset_ < id) {
-    this->received_ <<= (id - this->offset_);
+  if (id > this->offset_ || id < ((this->offset_ + (uint16_t)64) & 0x7FFF)) {
+    this->received_ <<= ((id - this->offset_) & 0x7FFF);
     this->offset_ = id;
   }
 
   // Check if already parced
-  if (this->received_ & 1 << (this->offset_ - id)) return false;
+  if (this->received_ & 1 << ((id - this->offset_) & 0x7FFF)) return 1;
 
   // Add the id to the received list
-  this->received_ |= 1 << (this->offset_ - id);
+  this->received_ |= 1 << ((id - this->offset_) & 0x7FFF);
 
   // Check for missing id's
   if (this->received_ != 0xFFFFFFFF)
     for (int i = 0; i < sizeof(this->received_) * 8; i++)
       if (!(this->received_ & 1 << i)) {
-        *missing = this->offset_ - i;
-        return false;
+        *missing = ((this->offset_ - i) & 0x7FFF);
+        return 2;
       }
 
-  return true;
+  return 0;
 }
 
 }  // namespace atem
