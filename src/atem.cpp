@@ -92,11 +92,13 @@ Atem::~Atem() {
 void Atem::task_() {
   char buffer[CONFIG_PACKET_BUFFER_SIZE];
   AtemPacket packet(buffer);
-  int ack_count = 0;
+  int ack_count = 0, len;
 
   for (;;) {
-    int len =
-        recv(this->sockfd_, packet.GetData(), CONFIG_PACKET_BUFFER_SIZE, 0);
+    // Get length of next package
+    len = recv(this->sockfd_, packet.GetData(), 2, MSG_PEEK);
+    if (packet.GetLength() > sizeof buffer)
+      ESP_LOGE(TAG, "Next package is buffer than buffer");
 
     // Something went wrong
     if (len < 0) {
@@ -120,6 +122,18 @@ void Atem::task_() {
       }
 
       ack_count++;
+      continue;
+    }
+
+    int recv_len = packet.GetLength();
+    if (recv_len > sizeof buffer) {
+      ESP_LOGE(TAG, "Next package is buffer than buffer");
+      recv_len = sizeof buffer;
+    }
+
+    // Get next packet
+    if ((len = recv(this->sockfd_, packet.GetData(), recv_len, 0)) < 0) {
+      ESP_LOGE(TAG, "recv error: %s (%i)", strerror(errno), errno);
       continue;
     }
 
