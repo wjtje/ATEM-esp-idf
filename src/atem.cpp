@@ -46,7 +46,7 @@ Atem::Atem() {
 
   // Set socket timeout
   struct timeval timeout;
-  timeout.tv_sec = 4;
+  timeout.tv_sec = 1;
   timeout.tv_usec = 0;
   if ((status = setsockopt(this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout,
                            sizeof timeout)) != 0) {
@@ -107,7 +107,7 @@ void Atem::task_() {
         continue;
       }
 
-      if (ack_count > 10) {  // Already send multiple ACK requests
+      if (ack_count > 4) {  // Already send multiple ACK requests
         this->Reconnect_();
         continue;
       }
@@ -217,31 +217,35 @@ void Atem::task_() {
       }
     }
 
-    // Check if we are receiving it in order
-    int16_t missing_id = 0;
-    int order_check = this->CheckOrder_(packet.GetId(), &missing_id);
-    if (order_check == 1) {
-      ESP_LOGW(TAG, "Received packet %u, but is was already parced",
-               packet.GetId());
-    } else if (order_check == 1) {
-      ESP_LOGW(TAG, "Missing packet %u, requesting it", missing_id);
-
-      auto p = new AtemPacket(0x8, this->session_id_, 12);
-      p->SetResendId(missing_id);
-      this->SendPacket_(p);
-      delete p;
-      continue;
-    }
-
     // Send ACK
-    if (packet.GetFlags() & 0x1 && this->state_ == ConnectionState::ACTIVE) {
+    if (packet.GetFlags() & 0x1) {
       this->remote_id_ = packet.GetId();
       ESP_LOGD(TAG, "-> ACK %u", this->remote_id_);
+
       // Respond to ACK
-      AtemPacket *p = new AtemPacket(0x10, packet.GetSessionId(), 12);
-      p->SetAckId(this->remote_id_);
-      this->SendPacket_(p);
-      delete p;
+      if (this->state_ == ConnectionState::ACTIVE) {
+        AtemPacket *p = new AtemPacket(0x10, packet.GetSessionId(), 12);
+        p->SetAckId(this->remote_id_);
+        this->SendPacket_(p);
+        delete p;
+      }
+
+      // Check if we are receiving it in order
+      int16_t missing_id = this->CheckOrder_(packet.GetId());
+      if (missing_id == -2) {
+        ESP_LOGW(TAG, "Received packet %u, but is was already parced",
+                 packet.GetId());
+        continue;  // We can ignore this packet
+      } else if (missing_id >= 0) {
+        ESP_LOGE(TAG, "Missing packet %u", missing_id);
+
+        // Request missing
+        auto p = new AtemPacket(0x8, this->session_id_, 12);
+        p->SetResendId(missing_id);
+        // ((uint8_t *)p->GetData())[8] = 0x01;
+        this->SendPacket_(p);
+        delete p;
+      }
     }
 
     // Receive ACK
@@ -260,7 +264,7 @@ void Atem::task_() {
     }
 
     // Check size of packet
-    if (len <= 12 || packet.GetFlags() & 0x2 || order_check != 0) continue;
+    if (len <= 12 || packet.GetFlags() & 0x2) continue;
 
     // Parse packet
     ESP_LOGD(TAG, "Got packet with %u bytes", len);
@@ -420,9 +424,6 @@ void Atem::task_() {
         if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
         this->me_[me].trst_.style = command.GetData<uint8_t *>()[1];
         this->me_[me].trst_.next = command.GetData<uint8_t *>()[2];
-
-        ESP_LOGD(TAG, "Transition State: me: %u style: %u next: %u", me,
-                 this->me_[me].trst_.style, this->me_[me].trst_.next);
       }
     }
   }
@@ -449,7 +450,7 @@ void Atem::Reconnect_() {
   this->state_ = ConnectionState::CONNECTED;
   this->local_id_ = 0;
   this->remote_id_ = 0;
-  this->offset_ = 0;
+  this->offset_ = 1;
   this->received_ = 0xFFFFFFFE;
   this->session_id_ = 0x0B06;
 
@@ -506,30 +507,32 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   }
 }
 
-int Atem::CheckOrder_(int16_t id, int16_t *missing) {
+int16_t Atem::CheckOrder_(int16_t id) {
+  static uint16_t recv_len = sizeof(this->received_) * 8;
+  uint16_t offset = (id - this->offset_) & 0x7FFF;
   // Max id that the ATEM can send is 0x7FFF
 
   // Make room
-  if (id > this->offset_ || id < ((this->offset_ + (uint16_t)64) & 0x7FFF)) {
-    this->received_ <<= ((id - this->offset_) & 0x7FFF);
+  if (offset < recv_len) {
+    this->received_ <<= offset;
     this->offset_ = id;
   }
 
+  // Offset maybe move, recalculate
+  offset = abs(id - this->offset_);
+
   // Check if already parced
-  if (this->received_ & 1 << ((id - this->offset_) & 0x7FFF)) return 1;
+  if (this->received_ & 1 << offset) return -2;
 
   // Add the id to the received list
-  this->received_ |= 1 << ((id - this->offset_) & 0x7FFF);
+  this->received_ |= 1 << offset;
 
   // Check for missing id's
   if (this->received_ != 0xFFFFFFFF)
-    for (int i = 0; i < sizeof(this->received_) * 8; i++)
-      if (!(this->received_ & 1 << i)) {
-        *missing = ((this->offset_ - i) & 0x7FFF);
-        return 2;
-      }
+    for (int16_t i = recv_len - 1; i != 0; i--)
+      if (!(this->received_ & 1 << i)) return ((this->offset_ - i) & 0x7FFF);
 
-  return 0;
+  return -1;
 }
 
 }  // namespace atem

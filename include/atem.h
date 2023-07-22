@@ -16,6 +16,7 @@
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
 
+#include <cmath>
 #include <map>
 #include <utility>
 #include <vector>
@@ -228,7 +229,7 @@ class Atem {
   uint16_t remote_id_{0};
 
   // Check missing packets
-  int16_t offset_{0};
+  int16_t offset_{1};
   uint32_t received_{0xFFFFFFFE};
 
   // Packets send
@@ -266,12 +267,11 @@ class Atem {
    * in order.
    *
    * @param id The id of the received packet
-   * @param missing Where to store the id of the missing packet
-   * @return 0 The order is correct
-   * @return 1 The id was already parced
-   * @return 2 A packet is missing, check missing parameter
+   * @return >0 A packet with this id is missing
+   * @return -1 This is fine
+   * @return -2 Already parced
    */
-  int CheckOrder_(int16_t id, int16_t* missing);
+  int16_t CheckOrder_(int16_t id);
 };
 
 }  // namespace atem
