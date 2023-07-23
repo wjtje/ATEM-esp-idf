@@ -24,9 +24,7 @@ esp_err_t Atem::Config::Decode_(cJSON *json) {
     return ESP_FAIL;
   }
 
-  cJSON_GetObjectCheck(atem_obj, port, Number);
-  this->addr_.sin_port = htons(port_obj->valueint);
-
+  this->addr_.sin_port = htons(9910);
   this->addr_.sin_family = AF_INET;
 
   return ESP_OK;
