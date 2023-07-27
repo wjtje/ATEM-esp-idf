@@ -180,6 +180,7 @@ struct UskState {
   int16_t bottom;
   int16_t left;
   int16_t right;
+  bool at_key_frame;
   UskDveProperties dve_;
 };
 

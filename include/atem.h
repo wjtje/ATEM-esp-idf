@@ -28,6 +28,57 @@
 
 namespace atem {
 
+ESP_EVENT_DECLARE_BASE(ATEM_EVENT);
+
+/**
+ * @brief Atem events
+ *
+ * Events are command clusted by type, so it's easer to consume (that's my
+ * opinion)
+ */
+enum : int32_t {
+  /**
+   * @brief AuxS
+   */
+  ATEM_EVENT_AUX,
+  /**
+   * @brief DskB / DskP / DskS
+   */
+  ATEM_EVENT_DSK,
+  /**
+   * @brief InPr
+   */
+  ATEM_EVENT_INPUT_PROPERTIES,
+  /**
+   * @brief KeBP / KeDV / KeOn
+   */
+  ATEM_EVENT_USK,
+  /**
+   * @brief _mpl / MPCE
+   */
+  ATEM_EVENT_MEDIA_PLAYER,
+  /**
+   * @brief _pin
+   */
+  ATEM_EVENT_PRODUCT_ID,
+  /**
+   * @brief _ver
+   */
+  ATEM_EVENT_PROTOCOL_VERSION,
+  /**
+   * @brief PrgI / PrvI
+   */
+  ATEM_EVENT_SOURCE,
+  /**
+   * @brief _top
+   */
+  ATEM_EVENT_TOPOLOGY,
+  /**
+   * @brief TrPs / TrSS
+   */
+  ATEM_EVENT_TRANSITION,
+};
+
 class Atem {
  public:
   static Atem* GetInstance();
@@ -246,7 +297,7 @@ class Atem {
   types::UskState* usk_{nullptr};           // [me * top_.usk + keyer]
   types::DskState* dsk_{nullptr};           // [keyer]
   types::Source* aux_inp_{nullptr};         // Source in aux [aux]
-  types::MediaPlayerSource* mps_{nullptr};  // Media player source
+  types::MediaPlayerSource* mps_{nullptr};  // Media player source [mpl]
 
   TaskHandle_t task_handle_;
   void task_();

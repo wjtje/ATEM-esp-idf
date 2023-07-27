@@ -17,6 +17,10 @@ This list contains other notable projects that where used during the making of t
 
 Well, this code has references to other libraries (e.g. ConfigManager) that are not included in this project for various reasons. You can use this code as a starting point for your code, but when you need to reference this code and all other used resources.
 
+There is a `linux-port` branch on this repo, its a modified version of this code that can be compiled and run on _any_ linux device.
+
+You can use doxygen to generate documentation, just run `doxygen Doxyfile`.
+
 ## License
 
 The MIT License (MIT) - Copyright (c) 2023 Wouter van der Wal

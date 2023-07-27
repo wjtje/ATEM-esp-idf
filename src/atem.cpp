@@ -2,6 +2,8 @@
 
 namespace atem {
 
+ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
+
 const char *TAG{"ATEM"};
 Atem *Atem::instance_{nullptr};
 SemaphoreHandle_t Atem::mutex_ = xSemaphoreCreateMutex();
@@ -266,22 +268,27 @@ void Atem::task_() {
 
     // Parse packet
     ESP_LOGD(TAG, "Got packet with %u bytes", len);
+    uint32_t event = 0;
 
     for (int i = 0; AtemCommand command : packet) {
       if (++i > 512) break;  // Limit 512 command in a single packet
 
       if (command == "_mpl") {  // Media Player
+        event |= 1 << ATEM_EVENT_MEDIA_PLAYER;
         this->mpl_.still = command.GetData<uint8_t *>()[0];
         this->mpl_.clip = command.GetData<uint8_t *>()[1];
       } else if (command == "_ver") {  // Protocol version
+        event |= 1 << ATEM_EVENT_PROTOCOL_VERSION;
         this->ver_ = {.major = ntohs(command.GetData<uint16_t *>()[0]),
                       .minor = ntohs(command.GetData<uint16_t *>()[1])};
       } else if (command == "_pin") {  // Product Id
+        event |= 1 << ATEM_EVENT_PRODUCT_ID;
         delete this->pid_;
         size_t len = strlen(command.GetData<char *>()) + 1;
         this->pid_ = new char[len];
         memcpy(this->pid_, command.GetData<char *>(), len);
       } else if (command == "_top") {  // Topology
+        event |= 1 << ATEM_EVENT_TOPOLOGY;
         memcpy(&this->top_, command.GetData<void *>(), sizeof(this->top_));
 
         // Clear memory
@@ -298,12 +305,14 @@ void Atem::task_() {
         this->aux_inp_ = new types::Source[this->top_.aux];
         this->mps_ = new types::MediaPlayerSource[this->top_.mediaplayers];
       } else if (command == "AuxS") {  // AUX Select
+        event |= 1 << ATEM_EVENT_AUX;
         uint8_t channel = command.GetData<uint8_t *>()[0];
         if (this->aux_inp_ == nullptr || this->top_.aux - 1 < channel) continue;
 
         this->aux_inp_[channel] =
             (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
       } else if (command == "DskB") {  // DSK Source
+        event |= 1 << ATEM_EVENT_DSK;
         uint8_t keyer = command.GetData<uint8_t *>()[0];
         if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) continue;
 
@@ -312,11 +321,13 @@ void Atem::task_() {
         this->dsk_[keyer].key =
             (types::Source)ntohs(command.GetData<uint16_t *>()[2]);
       } else if (command == "DskP") {  // DSK Properties
+        event |= 1 << ATEM_EVENT_DSK;
         uint8_t keyer = command.GetData<uint8_t *>()[0];
         if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) continue;
 
         this->dsk_[keyer].tie = command.GetData<uint8_t *>()[1];
       } else if (command == "DskS") {  // DSK State
+        event |= 1 << ATEM_EVENT_DSK;
         uint8_t keyer = command.GetData<uint8_t *>()[0];
         if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) continue;
 
@@ -325,6 +336,7 @@ void Atem::task_() {
         this->dsk_[keyer].is_auto_transitioning =
             command.GetData<uint8_t *>()[3];
       } else if (command == "InPr") {  // Input Property
+        event |= 1 << ATEM_EVENT_INPUT_PROPERTIES;
         auto source = command.GetDataS<types::Source>(0);
         types::InputProperty *inpr = new types::InputProperty;
 
@@ -350,6 +362,7 @@ void Atem::task_() {
 
         this->input_properties_[source] = inpr;
       } else if (command == "KeBP") {  // Key properties
+        event |= 1 << ATEM_EVENT_USK;
         uint8_t me = command.GetData<uint8_t *>()[0];
         uint8_t keyer = command.GetData<uint8_t *>()[1];
 
@@ -367,6 +380,7 @@ void Atem::task_() {
         prop->left = ntohs(command.GetData<uint16_t *>()[8]);
         prop->right = ntohs(command.GetData<uint16_t *>()[9]);
       } else if (command == "KeDV") {  // Key properties DVE
+        event |= 1 << ATEM_EVENT_USK;
         uint8_t me = command.GetData<uint8_t *>()[0];
         uint8_t keyer = command.GetData<uint8_t *>()[1];
 
@@ -381,7 +395,20 @@ void Atem::task_() {
         prop->pos_x = ntohl(command.GetData<uint32_t *>()[3]);
         prop->pos_y = ntohl(command.GetData<uint32_t *>()[4]);
         prop->rotation = ntohl(command.GetData<uint32_t *>()[5]);
+      } else if (command == "KeFS") {  // Key Fly State
+        event |= 1 < ATEM_EVENT_USK;
+        uint8_t me = command.GetData<uint8_t *>()[0];
+        uint8_t keyer = command.GetData<uint8_t *>()[1];
+
+        // Check if we have allocated memory for this
+        if (this->usk_ == nullptr || this->top_.me - 1 < me ||
+            this->top_.usk - 1 < keyer)
+          continue;
+
+        this->usk_[me * this->top_.usk + keyer].at_key_frame =
+            command.GetData<uint8_t *>()[6];
       } else if (command == "KeOn") {  // Key on Air
+        event |= 1 << ATEM_EVENT_USK;
         uint8_t me = command.GetData<uint8_t *>()[0];
         uint8_t keyer = command.GetData<uint8_t *>()[1];
         uint8_t state = command.GetData<uint8_t *>()[2];
@@ -392,6 +419,7 @@ void Atem::task_() {
         this->me_[me].usk_on_air &= ~(0x1 << keyer);
         this->me_[me].usk_on_air |= (state << keyer);
       } else if (command == "MPCE") {  // Media Player Source
+        event |= 1 << ATEM_EVENT_MEDIA_PLAYER;
         uint8_t mediaplayer = command.GetData<uint8_t *>()[0];
         if (this->top_.mediaplayers - 1 < mediaplayer) continue;
 
@@ -401,14 +429,17 @@ void Atem::task_() {
             .clip_index = command.GetData<uint8_t *>()[3],
         };
       } else if (command == "PrgI") {  // Program Input
+        event |= 1 << ATEM_EVENT_SOURCE;
         uint8_t me = command.GetData<uint8_t *>()[0];
         if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
         this->me_[me].program = command.GetDataS<types::Source>(1);
       } else if (command == "PrvI") {  // Preview Input
+        event |= 1 << ATEM_EVENT_SOURCE;
         uint8_t me = command.GetData<uint8_t *>()[0];
         if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
         this->me_[me].preview = command.GetDataS<types::Source>(1);
       } else if (command == "TrPs") {  // Transition Position
+        event |= 1 << ATEM_EVENT_TRANSITION;
         uint8_t me = command.GetData<uint8_t *>()[0];
         uint8_t state = command.GetData<uint8_t *>()[1];
         uint16_t pos = ntohs(command.GetData<uint16_t *>()[2]);
@@ -417,6 +448,7 @@ void Atem::task_() {
         this->me_[me].trst_.in_transition = (bool)(state & 0x01);
         this->me_[me].trst_.position = pos;
       } else if (command == "TrSS") {  // Transition State
+        event |= 1 << ATEM_EVENT_TRANSITION;
         uint8_t me = command.GetData<uint8_t *>()[0];
 
         if (this->me_ == nullptr || this->top_.me - 1 < me) continue;
@@ -424,6 +456,12 @@ void Atem::task_() {
         this->me_[me].trst_.next = command.GetData<uint8_t *>()[2];
       }
     }
+
+    // Send events
+    if (event != 0)
+      for (int32_t i = 0; i < sizeof(event) * 8; i++)
+        if (event & 1 << i)
+          esp_event_post(ATEM_EVENT, i, this, sizeof(this), 0);
   }
 
   vTaskDelete(nullptr);
