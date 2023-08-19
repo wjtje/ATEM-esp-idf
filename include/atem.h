@@ -118,8 +118,8 @@ class Atem {
    *
    * @return std::map<types::Source, types::InputProperty*>*
    */
-  const std::map<types::Source, types::InputProperty*>* GetInputProperties() {
-    return &this->input_properties_;
+  const std::map<types::Source, types::InputProperty*> GetInputProperties() {
+    return this->input_properties_;
   }
   /**
    * @brief Get the information about a specific source

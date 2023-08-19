@@ -460,8 +460,10 @@ void Atem::task_() {
     // Send events
     if (event != 0)
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & 1 << i)
-          esp_event_post(ATEM_EVENT, i, this, sizeof(this), 0);
+        if (event & 1 << i) {
+          esp_event_post(ATEM_EVENT, i, &this->instance_,
+                         sizeof(this->instance_), 0);
+        }
   }
 
   vTaskDelete(nullptr);
