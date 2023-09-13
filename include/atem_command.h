@@ -307,6 +307,11 @@ class ProgramInput : public AtemCommand {
   }
 };
 
+class SaveStartupState : public AtemCommand {
+ public:
+  SaveStartupState() : AtemCommand("SRsv", 12) { GetData<uint32_t *>()[0] = 0; }
+};
+
 class TransitionPosition : public AtemCommand {
  public:
   TransitionPosition(uint16_t position, uint8_t me = 0)
