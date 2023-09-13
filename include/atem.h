@@ -102,6 +102,13 @@ class Atem {
     return this->aux_inp_[channel];
   }
   /**
+   * @brief Get all sources that are currently displayed on a aux channel
+   *
+   * @return types::Source*
+   * @warning This can be null, length can be determented using GetTopology
+   */
+  types::Source* GetAuxInputs() { return this->aux_inp_; }
+  /**
    * @brief Get the state of a DSK
    *
    * @warning This function can return nullptr when invalid
