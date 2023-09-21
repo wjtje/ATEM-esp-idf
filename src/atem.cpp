@@ -53,8 +53,13 @@ Atem::Atem() {
     ESP_LOGE(TAG, "Failed to setsockopt (%s)", strerror(status));
   }
 
+  // Pre allocate send vector
+  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
+  this->send_packets_.reserve(34);
+  xSemaphoreGive(this->send_mutex_);
+
   // Create background task
-  if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem", 4096,
+  if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem", 5120,
                             this, configMAX_PRIORITIES, &this->task_handle_))) {
     ESP_LOGE(TAG, "Failed to create task");
     abort();
@@ -77,7 +82,7 @@ Atem::~Atem() {
   delete this->mps_;
 
   xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
-  for (auto p : this->send_packets_) delete p.second;
+  for (auto p : this->send_packets_) delete p;
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
 
@@ -200,9 +205,15 @@ void Atem::task_() {
 
       // Try to find the packet
       if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
-        if (this->send_packets_.contains(packet.GetAckId())) {
-          this->SendPacket_(this->send_packets_[packet.GetAckId()]);
-          send = true;
+        int16_t id = packet.GetId();
+        for (int i = 0; AtemPacket * p : this->send_packets_) {
+          if (i++ > 50) break;  // Limit to max 50 loops
+
+          if (p->GetId() == id) {
+            this->SendPacket_(p);
+            send = true;
+            break;
+          }
         }
 
         xSemaphoreGive(this->send_mutex_);
@@ -253,10 +264,30 @@ void Atem::task_() {
       ESP_LOGD(TAG, "<- ACK %u", packet.GetAckId());
 
       if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
-        if (this->send_packets_.contains(packet.GetAckId())) {
-          delete this->send_packets_[packet.GetAckId()];
-          this->send_packets_.erase(packet.GetAckId());
+        int16_t id = packet.GetAckId();
+        int i = 0;
+
+        for (std::vector<AtemPacket *>::iterator it =
+                 this->send_packets_.begin();
+             it != this->send_packets_.end();) {
+          if (i++ > 50) break;  // Limit to max 50 loops
+
+          // Remove all packets older than 32
+          if ((((*it)->GetId() - id) & 0x7FFF) > 32 &&
+              ((id - (*it)->GetId()) & 0x7FFF) > 32) {
+            ESP_LOGD(TAG, "Remove packet with id %i because it's to old",
+                     (*it)->GetId());
+            delete (*it);
+            it = this->send_packets_.erase(it);
+          } else if ((*it)->GetId() == id) {
+            delete (*it);
+            it = this->send_packets_.erase(it);
+            break;
+          } else {
+            ++it;
+          }
         }
+
         xSemaphoreGive(this->send_mutex_);
       } else {
         ESP_LOGW(TAG, "Failed to note of ACK");
@@ -494,7 +525,7 @@ void Atem::Reconnect_() {
 
   // Remove all packets
   xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
-  for (auto p : this->send_packets_) delete p.second;
+  for (auto p : this->send_packets_) delete p;
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
 
@@ -537,7 +568,12 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
 
   // Store packet in send_packets_
   if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
-    this->send_packets_[this->local_id_] = packet;
+    if (this->send_packets_.size() < 33) {
+      this->send_packets_.push_back(packet);
+    } else {
+      ESP_LOGW(TAG, "Failed to store packet");
+      delete packet;
+    }
     xSemaphoreGive(this->send_mutex_);
   } else {
     ESP_LOGW(TAG, "Failed to store packet");

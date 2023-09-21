@@ -292,7 +292,7 @@ class Atem {
 
   // Packets send
   SemaphoreHandle_t send_mutex_{xSemaphoreCreateMutex()};
-  std::map<uint16_t, AtemPacket*> send_packets_;
+  std::vector<AtemPacket*> send_packets_;
 
   // ATEM state
   std::map<types::Source, types::InputProperty*> input_properties_;
