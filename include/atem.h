@@ -123,25 +123,15 @@ class Atem {
   /**
    * @brief Get the map of input properties
    *
+   * @warning Make sure you got the mutex for this value
+   *
    * @return std::map<types::Source, types::InputProperty*>*
    */
   const std::map<types::Source, types::InputProperty*> GetInputProperties() {
     return this->input_properties_;
   }
-  /**
-   * @brief Get the information about a specific source
-   *
-   * @warning This function can return nullptr when the source isn't found
-   *
-   * @param source
-   * @return const types::InputProperty*
-   */
-  const types::InputProperty* GetInputProperty(types::Source source) {
-    auto it = this->input_properties_.find(source);
-    if (it == this->input_properties_.end())
-      return nullptr;
-    else
-      return (*it).second;
+  SemaphoreHandle_t GetInputPropertiesMutex() {
+    return this->input_properties_mutex_;
   }
   /**
    * @brief Get information about how many stills and clip the media player can
@@ -295,6 +285,7 @@ class Atem {
   std::vector<AtemPacket*> send_packets_;
 
   // ATEM state
+  SemaphoreHandle_t input_properties_mutex_{xSemaphoreCreateMutex()};
   std::map<types::Source, types::InputProperty*> input_properties_;
   types::Topology top_;                     // Topology
   types::ProtocolVersion ver_;              // Protocol version

@@ -385,13 +385,21 @@ void Atem::task_() {
         if (len > 4) len = 4;
         memset(inpr->name_short + len, 0, sizeof(inpr->name_short) - len);
 
-        // Remove if already exists
-        if (this->input_properties_.contains(source)) {
-          delete this->input_properties_[source];
-          this->input_properties_.erase(source);
-        }
+        // Lock input properties
+        if (xSemaphoreTake(this->input_properties_mutex_,
+                           100 / portTICK_PERIOD_MS)) {
+          // Remove if already exists
+          if (this->input_properties_.contains(source)) {
+            delete this->input_properties_[source];
+            this->input_properties_.erase(source);
+          }
 
-        this->input_properties_[source] = inpr;
+          this->input_properties_[source] = inpr;
+          xSemaphoreGive(this->input_properties_mutex_);
+        } else {
+          ESP_LOGE(TAG, "Failed to safe Inpr becuase of mutex");
+          delete inpr;
+        }
       } else if (command == "KeBP") {  // Key properties
         event |= 1 << ATEM_EVENT_USK;
         uint8_t me = command.GetData<uint8_t *>()[0];
