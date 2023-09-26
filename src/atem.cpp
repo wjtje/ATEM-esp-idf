@@ -36,6 +36,11 @@ Atem::Atem() {
   ESP_ERROR_CHECK_WITHOUT_ABORT(
       config_manager::ConfigManager::Restore(&this->config_));
 
+  // Clear variables
+  memset(&this->top_, 0, sizeof(this->top_));
+  memset(&this->ver_, 0, sizeof(this->ver_));
+  memset(&this->mpl_, 0, sizeof(this->mpl_));
+
   // Create socket
   int status;
   this->sockfd_ = socket(AF_UNSPEC, SOCK_DGRAM, AF_INET);
@@ -78,6 +83,7 @@ Atem::~Atem() {
   delete this->pid_;
   delete this->me_;
   delete this->usk_;
+  delete this->dsk_;
   delete this->aux_inp_;
   delete this->mps_;
 
@@ -189,8 +195,10 @@ void Atem::task_() {
         ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
                  this->ver_.minor);
         ESP_LOGI(TAG, "Model: %s", this->pid_);
-        ESP_LOGI(TAG, "Topology: ME(%u), sources(%u)", this->top_.me,
-                 this->top_.sources);
+        ESP_LOGI(TAG,
+                 "Topology: ME(%u), sources(%u), dsk(%u), usk(%u), aux(%u)",
+                 this->top_.me, this->top_.sources, this->top_.dsk,
+                 this->top_.usk, this->top_.aux);
       }
 
       ESP_LOGI(TAG, "Initialization done");

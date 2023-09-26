@@ -208,9 +208,9 @@ class Atem {
    *
    * @param keyer Which keyer to use, default to 0
    * @param me Which ME to use, default to 0
-   * @return const types::UskProperties*
+   * @return types::UskProperties*
    */
-  const types::UskState* GetUskState(uint8_t keyer = 0, uint8_t me = 0) {
+  types::UskState* GetUskState(uint8_t keyer = 0, uint8_t me = 0) {
     if (this->usk_ == nullptr || this->top_.me - 1 < me ||
         this->top_.usk - 1 < keyer)
       return nullptr;
