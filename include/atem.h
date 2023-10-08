@@ -125,9 +125,9 @@ class Atem {
    *
    * @warning Make sure you got the mutex for this value
    *
-   * @return std::map<types::Source, types::InputProperty*>*
+   * @return std::map<types::Source, types::InputProperty>*
    */
-  const std::map<types::Source, types::InputProperty*> GetInputProperties() {
+  const std::map<types::Source, types::InputProperty> GetInputProperties() {
     return this->input_properties_;
   }
   SemaphoreHandle_t GetInputPropertiesMutex() {
@@ -286,11 +286,11 @@ class Atem {
 
   // ATEM state
   SemaphoreHandle_t input_properties_mutex_{xSemaphoreCreateMutex()};
-  std::map<types::Source, types::InputProperty*> input_properties_;
+  std::map<types::Source, types::InputProperty> input_properties_;
   types::Topology top_;                     // Topology
   types::ProtocolVersion ver_;              // Protocol version
   types::MediaPlayer mpl_;                  // Media player
-  char* pid_{nullptr};                      // Product Id
+  char pid_[45];                            // Product Id
   types::MixEffectState* me_{nullptr};      // [me]
   types::UskState* usk_{nullptr};           // [me * top_.usk + keyer]
   types::DskState* dsk_{nullptr};           // [keyer]

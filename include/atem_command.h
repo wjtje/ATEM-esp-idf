@@ -18,6 +18,10 @@
 
 #include "atem_types.h"
 
+#define ATEM_CMD(s)                                                    \
+  ((uint32_t)s[0] << 24 | (uint32_t)s[1] << 16 | (uint32_t)s[2] << 8 | \
+   (uint32_t)s[3])
+
 namespace atem {
 
 /**
@@ -36,8 +40,6 @@ class AtemCommand {
    */
   AtemCommand(const char *cmd, uint16_t length);
   virtual ~AtemCommand();
-
-  bool operator==(const char *b) { return !memcmp(this->GetCmd(), b, 4); }
 
   /**
    * @brief Prepair the command for sending, this can be used when some protocol
