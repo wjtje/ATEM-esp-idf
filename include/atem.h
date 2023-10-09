@@ -96,16 +96,14 @@ class Atem {
    * @param channel Which aux channel to use, default to 0
    * @return Which source is displayed, returns 0xFFFF when it's invalid
    */
-  types::Source GetAuxInput(uint8_t channel = 0) {
-    if (this->aux_inp_ == nullptr || this->top_.aux - 1 < channel)
-      return (types::Source)0xFFFF;
-    return this->aux_inp_[channel];
-  }
+  types::Source GetAuxOutput(uint8_t channel = 0);
   /**
    * @brief Get all sources that are currently displayed on a aux channel
    *
-   * @return types::Source*
    * @warning This can be null, length can be determented using GetTopology
+   * @warning Make sure your task has ownership over the atem state
+   *
+   * @return types::Source*
    */
   types::Source* GetAuxInputs() { return this->aux_inp_; }
   /**
@@ -114,59 +112,50 @@ class Atem {
    * @warning This function can return nullptr when invalid
    *
    * @param keyer
-   * @return types::DskState*
+   * @return types::DskState
    */
-  types::DskState* GetDskState(uint8_t keyer = 0) {
-    if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) return nullptr;
-    return &this->dsk_[keyer];
-  }
+  types::DskState GetDskState(uint8_t keyer = 0);
   /**
    * @brief Get the map of input properties
    *
-   * @warning Make sure you got the mutex for this value
+   * @warning Make sure your task has ownership over the atem state
    *
    * @return std::map<types::Source, types::InputProperty>*
    */
   const std::map<types::Source, types::InputProperty> GetInputProperties() {
     return this->input_properties_;
   }
-  SemaphoreHandle_t GetInputPropertiesMutex() {
-    return this->input_properties_mutex_;
-  }
+  /**
+   * @brief Get the State Mutex
+   *
+   * @warning Make sure you give the mutex back within 100ms
+   *
+   * @return SemaphoreHandle_t
+   */
+  SemaphoreHandle_t GetStateMutex() { return this->state_mutex_; }
   /**
    * @brief Get information about how many stills and clip the media player can
    * hold
    *
    * @return types::MediaPlayer
    */
-  types::MediaPlayer GetMediaPlayer() { return this->mpl_; }
+  types::MediaPlayer GetMediaPlayer();
   /**
    * @brief Get the access to the active source on a specific mediaplayer
    *
    * @param mediaplayer
    * @return types::MediaPlayerSource
    */
-  types::MediaPlayerSource GetMediaPlayerSource(uint8_t mediaplayer) {
-    if (this->top_.mediaplayers - 1 < mediaplayer || this->mps_ == nullptr)
-      return (types::MediaPlayerSource){
-          .type = 0, .still_index = 0, .clip_index = 0};
-    return this->mps_[mediaplayer];
-  }
+  types::MediaPlayerSource GetMediaPlayerSource(uint8_t mediaplayer);
   /**
    * @brief Get the current preview source active on ME
    *
    * @param me Which ME to use, defaults to 0
    * @return Which source is displayed, returns 0xFFFF when it's invalid
    */
-  types::Source GetPreviewInput(uint8_t me = 0) {
-    if (this->me_ == nullptr || this->top_.me - 1 < me)
-      return (types::Source)0xFFFF;
-    return this->me_[me].preview;
-  }
+  types::Source GetPreviewInput(uint8_t me = 0);
   /**
    * @brief Get the Product Id (model) of the connected atem.
-   *
-   * @warning This is {nullptr} when no atem is connected
    *
    * @return char*
    */
@@ -177,45 +166,35 @@ class Atem {
    * @param me Which ME to use, defaults to 0
    * @return Which source is displayed, returns 0xFFFF when it's invalid
    */
-  types::Source GetProgramInput(uint8_t me = 0) {
-    if (this->me_ == nullptr || this->top_.me - 1 < me)
-      return (types::Source)0xFFFF;
-    return this->me_[me].program;
-  }
-  types::ProtocolVersion GetProtocolVersion() { return this->ver_; }
+  types::Source GetProgramInput(uint8_t me = 0);
+  /**
+   * @brief Get the Protocol Version
+   *
+   * @return types::ProtocolVersion
+   */
+  types::ProtocolVersion GetProtocolVersion();
   /**
    * @brief Get the topology of the connected ATEM
    *
    * @return types::Topology
    */
-  types::Topology GetTopology() { return this->top_; }
+  types::Topology GetTopology();
   /**
    * @brief Get the information about the current transition on a ME
    *
    * @param me Which ME to use, defaults to 0
-   * @return const types::TransitionState
+   * @return types::TransitionState
    */
-  const types::TransitionState GetTransitionState(uint8_t me = 0) {
-    if (this->me_ == nullptr || this->top_.me - 1 < me)
-      return (types::TransitionState){
-          .in_transition = false, .position = 0, .style = 0, .next = 0};
-    return this->me_[me].trst_;
-  }
+  types::TransitionState GetTransitionState(uint8_t me = 0);
   /**
    * @brief Get the Usk Properties object
    *
-   * @warning This can return nullptr when it's invalid
-   *
    * @param keyer Which keyer to use, default to 0
    * @param me Which ME to use, default to 0
-   * @return types::UskProperties*
+   *
+   * @return types::UskState
    */
-  types::UskState* GetUskState(uint8_t keyer = 0, uint8_t me = 0) {
-    if (this->usk_ == nullptr || this->top_.me - 1 < me ||
-        this->top_.usk - 1 < keyer)
-      return nullptr;
-    return &this->usk_[me * this->top_.usk + keyer];
-  }
+  types::UskState GetUskState(uint8_t keyer = 0, uint8_t me = 0);
   /**
    * @brief Get the Usk Dve Properties object
    *
@@ -223,12 +202,7 @@ class Atem {
    * @param me Which ME to use, default to 0
    * @return Weather the USK is active or not
    */
-  bool GetUskOnAir(uint8_t keyer = 0, uint8_t me = 0) {
-    if (this->me_ == nullptr || this->top_.me - 1 < me ||
-        this->top_.usk - 1 < keyer)
-      return false;
-    return this->me_[me].usk_on_air & (0x1 << keyer);
-  }
+  bool GetUskOnAir(uint8_t keyer = 0, uint8_t me = 0);
 
   /**
    * @brief Send a list of commands to the ATEM, memory is automaticaly
@@ -285,7 +259,7 @@ class Atem {
   std::vector<AtemPacket*> send_packets_;
 
   // ATEM state
-  SemaphoreHandle_t input_properties_mutex_{xSemaphoreCreateMutex()};
+  SemaphoreHandle_t state_mutex_{xSemaphoreCreateMutex()};
   std::map<types::Source, types::InputProperty> input_properties_;
   types::Topology top_;                     // Topology
   types::ProtocolVersion ver_;              // Protocol version

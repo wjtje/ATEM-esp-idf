@@ -79,21 +79,21 @@ Atem::Atem() {
 Atem::~Atem() {
   vTaskDelete(this->task_handle_);
 
-  // Clear memory
-  delete this->me_;
-  delete this->usk_;
-  delete this->dsk_;
-  delete this->aux_inp_;
-  delete this->mps_;
-
+  // Clear cached packages
   xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
   for (auto p : this->send_packets_) delete p;
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
 
-  xSemaphoreTake(this->input_properties_mutex_, portMAX_DELAY);
+  // Clear memory
+  xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
   this->input_properties_.clear();
-  xSemaphoreGive(this->input_properties_mutex_);
+  delete this->me_;
+  delete this->usk_;
+  delete this->dsk_;
+  delete this->aux_inp_;
+  delete this->mps_;
+  xSemaphoreGive(this->state_mutex_);
 }
 
 void Atem::task_() {
@@ -187,12 +187,17 @@ void Atem::task_() {
     if (this->state_ == ConnectionState::INITIALIZING &&
         packet.GetFlags() & 0x1 && packet.GetLength() == 12) {
       // Show some basic information about the ATEM
-      ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
-               this->ver_.minor);
-      ESP_LOGI(TAG, "Model: %s", this->pid_);
-      ESP_LOGI(TAG, "Topology: ME(%u), sources(%u), dsk(%u), usk(%u), aux(%u)",
-               this->top_.me, this->top_.sources, this->top_.dsk,
-               this->top_.usk, this->top_.aux);
+      if (xSemaphoreTake(this->state_mutex_, 100 / portTICK_PERIOD_MS)) {
+        ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
+                 this->ver_.minor);
+        ESP_LOGI(TAG, "Model: %s", this->pid_);
+        ESP_LOGI(TAG,
+                 "Topology: ME(%u), sources(%u), dsk(%u), usk(%u), aux(%u)",
+                 this->top_.me, this->top_.sources, this->top_.dsk,
+                 this->top_.usk, this->top_.aux);
+
+        xSemaphoreGive(this->state_mutex_);
+      }
 
       ESP_LOGI(TAG, "Initialization done");
       this->session_id_ = packet.GetSessionId();
@@ -310,6 +315,14 @@ void Atem::task_() {
     types::UskState *usk_state;
     types::UskDveProperties *dve_properties;
 
+    // Lock access to the state
+    if (!xSemaphoreTake(this->state_mutex_, 150 / portTICK_PERIOD_MS)) {
+      ESP_LOGW(TAG,
+               "Failed to lock access to the state, make sure you only lock "
+               "the state for max 100ms.");
+      continue;
+    }
+
     for (int i = 0; AtemCommand command : packet) {
       if (++i > 512) break;  // Limit 512 command in a single packet
 
@@ -396,33 +409,22 @@ void Atem::task_() {
         case ATEM_CMD("InPr"):  // Input Property
           event |= 1 << ATEM_EVENT_INPUT_PROPERTIES;
           source = command.GetDataS<types::Source>(0);
+
           types::InputProperty inpr;
+          memset(&inpr, 0, sizeof(inpr));
 
-          memcpy(inpr.name_long, command.GetData<uint8_t *>() + 2,
-                 sizeof(inpr.name_long));
-          memcpy(inpr.name_short, command.GetData<uint8_t *>() + 22,
-                 sizeof(inpr.name_short));
+          // Copy name long
+          len = strnlen(command.GetData<char *>() + 2, sizeof(inpr.name_long));
+          memcpy(inpr.name_long, command.GetData<uint8_t *>() + 2, len);
 
-          // Clean garbage at the end of the string
-          len = strlen(inpr.name_long);
-          if (len > 20) len = 20;
-          memset(inpr.name_long + len, 0, sizeof(inpr.name_long) - len);
-          len = strlen(inpr.name_short);
-          if (len > 4) len = 4;
-          memset(inpr.name_short + len, 0, sizeof(inpr.name_short) - len);
+          // Copy name short
+          len =
+              strnlen(command.GetData<char *>() + 22, sizeof(inpr.name_short));
+          memcpy(inpr.name_short, command.GetData<uint8_t *>() + 22, len);
 
-          // Lock input properties
-          if (xSemaphoreTake(this->input_properties_mutex_,
-                             100 / portTICK_PERIOD_MS)) {
-            // Remove if already exists
-            if (this->input_properties_.contains(source))
-              this->input_properties_.erase(source);
+          // Store inpr
+          this->input_properties_[source] = inpr;
 
-            this->input_properties_[source] = inpr;
-            xSemaphoreGive(this->input_properties_mutex_);
-          } else {
-            ESP_LOGE(TAG, "Failed to safe Inpr becuase of mutex");
-          }
           break;
 
         case ATEM_CMD("KeBP"):  // Key properties
@@ -539,6 +541,8 @@ void Atem::task_() {
           break;
       }
     }
+
+    xSemaphoreGive(this->state_mutex_);  // unlock the access
 
     // Send events
     if (event != 0)

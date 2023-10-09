@@ -108,6 +108,7 @@ enum Source : uint16_t {
   ME3_PREVIEW,
   ME4_PROGRAM = 10040,
   ME4_PREVIEW,
+  UNDEFINED = 0xFFFF
 };
 
 struct InputProperty {
