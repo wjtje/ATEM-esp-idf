@@ -42,19 +42,22 @@ static struct {
 
 static int atem_cmd_info() {
   Atem *atem = Atem::GetInstance();
-  auto top_ = atem->GetTopology();
 
-  if (atem->Connected() && atem->GetProductId() != nullptr)
+  types::Topology topology;
+  types::ProtocolVersion version;
+
+  if (atem->Connected() && atem->GetTopology(&topology) &&
+      atem->GetProtocolVersion(&version))
     printf(
         "Connected ATEM:\nModel:\t\t\t%s\nProtocol "
         "version:\t%u.%u\nTopology:\n\tME:\t\t%u\n\tSources:\t%u\n\tDSK:\t\t%"
         "u\n\tAUX:\t\t%u\n\tMixminus:\t%u\n\tMediaplayers:\t%u\n\tRS485:\t\t%"
         "u\n\tHyperdecks:\t%u\n\tUSK:\t\t%u\n\tStingers:\t%u\n\tSupersources:"
         "\t%u\n",
-        atem->GetProductId(), atem->GetProtocolVersion().major,
-        atem->GetProtocolVersion().minor, top_.me, top_.sources, top_.dsk,
-        top_.aux, top_.mixminus_outputs, top_.mediaplayers, top_.rs485,
-        top_.hyperdecks, top_.usk, top_.stingers, top_.supersources);
+        atem->GetProductId(), version.major, version.minor, topology.me,
+        topology.sources, topology.dsk, topology.aux, topology.mixminus_outputs,
+        topology.mediaplayers, topology.rs485, topology.hyperdecks,
+        topology.usk, topology.stingers, topology.supersources);
   else
     printf("No ATEM is connected\n");
 

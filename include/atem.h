@@ -28,13 +28,14 @@
 
 namespace atem {
 
+extern const char* TAG;
 ESP_EVENT_DECLARE_BASE(ATEM_EVENT);
 
 /**
  * @brief Atem events
  *
- * Events are command clusted by type, so it's easer to consume (that's my
- * opinion)
+ * Events are commands clusted by type, so it's easer to consume (that's my
+ * opinion).
  */
 enum : int32_t {
   /**
@@ -91,12 +92,15 @@ class Atem {
    */
   bool Connected() { return this->state_ == ConnectionState::ACTIVE; }
   /**
-   * @brief Get the source that's currently displayed of the aux channel
+   * @brief Get the source that's currently displayed of the aux channel. It
+   * will return false when it's invalid.
    *
+   * @param source A variable that the source will be stored in
    * @param channel Which aux channel to use, default to 0
-   * @return Which source is displayed, returns 0xFFFF when it's invalid
+   *
+   * @return Weather or not the variable is valid
    */
-  types::Source GetAuxOutput(uint8_t channel = 0);
+  bool GetAuxOutput(types::Source* source, uint8_t channel = 0);
   /**
    * @brief Get all sources that are currently displayed on a aux channel
    *
@@ -105,16 +109,16 @@ class Atem {
    *
    * @return types::Source*
    */
-  types::Source* GetAuxInputs() { return this->aux_inp_; }
+  types::Source* GetAuxOutputs() { return this->aux_out_; }
   /**
    * @brief Get the state of a DSK
    *
-   * @warning This function can return nullptr when invalid
+   * @param state A variable that the state will be stored in
+   * @param keyer Which keyer to use
    *
-   * @param keyer
-   * @return types::DskState
+   * @return Weather or not the variable is valid
    */
-  types::DskState GetDskState(uint8_t keyer = 0);
+  bool GetDskState(types::DskState* state, uint8_t keyer = 0);
   /**
    * @brief Get the map of input properties
    *
@@ -128,7 +132,8 @@ class Atem {
   /**
    * @brief Get the State Mutex
    *
-   * @warning Make sure you give the mutex back within 100ms
+   * @warning Make sure you give the mutex back within 20ms or 16ms (e.g. 1
+   * frame)
    *
    * @return SemaphoreHandle_t
    */
@@ -137,23 +142,30 @@ class Atem {
    * @brief Get information about how many stills and clip the media player can
    * hold
    *
-   * @return types::MediaPlayer
+   * @param player A variable that will store the result
+   *
+   * @return Weather or not the variable is valid
    */
-  types::MediaPlayer GetMediaPlayer();
+  bool GetMediaPlayer(types::MediaPlayer* state);
   /**
    * @brief Get the access to the active source on a specific mediaplayer
    *
+   * @param state A variable that will hold the current state
    * @param mediaplayer
-   * @return types::MediaPlayerSource
+   *
+   * @return Weather or not the variable is valid
    */
-  types::MediaPlayerSource GetMediaPlayerSource(uint8_t mediaplayer);
+  bool GetMediaPlayerSource(types::MediaPlayerSource* state,
+                            uint8_t mediaplayer);
   /**
    * @brief Get the current preview source active on ME
    *
+   * @param source A variable that the source will be stored in
    * @param me Which ME to use, defaults to 0
-   * @return Which source is displayed, returns 0xFFFF when it's invalid
+   *
+   * @return Weather or not the variable is valid
    */
-  types::Source GetPreviewInput(uint8_t me = 0);
+  bool GetPreviewInput(types::Source* source, uint8_t me = 0);
   /**
    * @brief Get the Product Id (model) of the connected atem.
    *
@@ -163,46 +175,57 @@ class Atem {
   /**
    * @brief Get the current program source active on ME
    *
+   * @param source A variable that the source will be stored in
    * @param me Which ME to use, defaults to 0
-   * @return Which source is displayed, returns 0xFFFF when it's invalid
+   *
+   * @return Weather or not the variable is valid
    */
-  types::Source GetProgramInput(uint8_t me = 0);
+  bool GetProgramInput(types::Source* source, uint8_t me = 0);
   /**
    * @brief Get the Protocol Version
    *
-   * @return types::ProtocolVersion
+   * @param version A variable that will store the protocol version
+   *
+   * @return Weather or not the variable is valid
    */
-  types::ProtocolVersion GetProtocolVersion();
+  bool GetProtocolVersion(types::ProtocolVersion* version);
   /**
    * @brief Get the topology of the connected ATEM
    *
-   * @return types::Topology
+   * @param topology A variable that will store the topology
+   *
+   * @return Weather or not the variable is valid
    */
-  types::Topology GetTopology();
+  bool GetTopology(types::Topology* topology);
   /**
    * @brief Get the information about the current transition on a ME
    *
+   * @param state A variable that will store the current state
    * @param me Which ME to use, defaults to 0
-   * @return types::TransitionState
+   *
+   * @return Weather or not the variable is valid
    */
-  types::TransitionState GetTransitionState(uint8_t me = 0);
+  bool GetTransitionState(types::TransitionState* state, uint8_t me = 0);
   /**
    * @brief Get the Usk Properties object
    *
+   * @param state A variable that will store the current state
    * @param keyer Which keyer to use, default to 0
    * @param me Which ME to use, default to 0
    *
-   * @return types::UskState
+   * @return Weather or not the variable is valid
    */
-  types::UskState GetUskState(uint8_t keyer = 0, uint8_t me = 0);
+  bool GetUskState(types::UskState* state, uint8_t keyer = 0, uint8_t me = 0);
   /**
    * @brief Get the Usk Dve Properties object
    *
+   * @param state A variable that will store the current state
    * @param keyer Which keyer to use, default to 0
    * @param me Which ME to use, default to 0
-   * @return Weather the USK is active or not
+   *
+   * @return Weather or not the variable is valid
    */
-  bool GetUskOnAir(uint8_t keyer = 0, uint8_t me = 0);
+  bool GetUskOnAir(bool* state, uint8_t keyer = 0, uint8_t me = 0);
 
   /**
    * @brief Send a list of commands to the ATEM, memory is automaticaly
@@ -268,7 +291,7 @@ class Atem {
   types::MixEffectState* me_{nullptr};      // [me]
   types::UskState* usk_{nullptr};           // [me * top_.usk + keyer]
   types::DskState* dsk_{nullptr};           // [keyer]
-  types::Source* aux_inp_{nullptr};         // Source in aux [aux]
+  types::Source* aux_out_{nullptr};         // Source in aux [aux]
   types::MediaPlayerSource* mps_{nullptr};  // Media player source [mpl]
 
   TaskHandle_t task_handle_;
