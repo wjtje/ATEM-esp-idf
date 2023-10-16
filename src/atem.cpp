@@ -100,6 +100,7 @@ void Atem::task_() {
   char buffer[CONFIG_PACKET_BUFFER_SIZE];
   AtemPacket packet(buffer);
   int ack_count = 0, len;
+  uint32_t boot_events = 0;
 
   for (;;) {
     // Get length of next package
@@ -153,6 +154,10 @@ void Atem::task_() {
       continue;
     }
 
+    ESP_LOGD(TAG, "<- Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
+             packet.GetFlags(), packet.GetAckId(), packet.GetResendId(),
+             packet.GetId(), packet.GetLength());
+
     // Check session id
     if (this->state_ == ConnectionState::ACTIVE &&
         packet.GetSessionId() != this->session_id_) {
@@ -202,6 +207,10 @@ void Atem::task_() {
       ESP_LOGI(TAG, "Initialization done");
       this->session_id_ = packet.GetSessionId();
       this->state_ = ConnectionState::ACTIVE;
+
+      // Send event's
+      for (int32_t i = 0; i < sizeof(boot_events) * 8; i++)
+        if (boot_events & 1 << i) esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
     }
 
     // RESEND request
@@ -237,7 +246,6 @@ void Atem::task_() {
     // Send ACK
     if (packet.GetFlags() & 0x1) {
       this->remote_id_ = packet.GetId();
-      ESP_LOGD(TAG, "-> ACK %u", this->remote_id_);
 
       // Respond to ACK
       if (this->state_ == ConnectionState::ACTIVE) {
@@ -257,9 +265,9 @@ void Atem::task_() {
         ESP_LOGE(TAG, "Missing packet %u", missing_id);
 
         // Request missing
-        auto p = new AtemPacket(0x8, this->session_id_, 12);
+        auto p = new AtemPacket(0x18, this->session_id_, 12);
         p->SetResendId(missing_id);
-        // ((uint8_t *)p->GetData())[8] = 0x01;
+        p->SetAckId(missing_id - 1);  // We received the previous packet
         this->SendPacket_(p);
         delete p;
       }
@@ -267,8 +275,6 @@ void Atem::task_() {
 
     // Receive ACK
     if (packet.GetFlags() & 0x10 && this->state_ == ConnectionState::ACTIVE) {
-      ESP_LOGD(TAG, "<- ACK %u", packet.GetAckId());
-
       if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
         int16_t id = packet.GetAckId();
         int i = 0;
@@ -304,7 +310,6 @@ void Atem::task_() {
     if (len <= 12 || packet.GetFlags() & 0x2) continue;
 
     // Parse packet
-    ESP_LOGD(TAG, "Got packet with %u bytes", len);
     uint32_t event = 0;
 
     // Initialize common variables
@@ -546,12 +551,12 @@ void Atem::task_() {
     xSemaphoreGive(this->state_mutex_);  // unlock the access
 
     // Send events
-    if (event != 0)
+    if (event != 0 && this->state_ == ConnectionState::ACTIVE) {
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & 1 << i) {
-          esp_event_post(ATEM_EVENT, i, &this->instance_,
-                         sizeof(this->instance_), 0);
-        }
+        if (event & 1 << i) esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
+    } else {
+      boot_events |= event;
+    }
   }
 
   vTaskDelete(nullptr);
@@ -560,6 +565,10 @@ void Atem::task_() {
 esp_err_t Atem::SendPacket_(AtemPacket *packet) {
   ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
                          ESP_LOG_VERBOSE);
+
+  ESP_LOGD(TAG, "-> Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
+           packet->GetFlags(), packet->GetAckId(), packet->GetResendId(),
+           packet->GetId(), packet->GetLength());
 
   int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
   if (len != packet->GetLength()) {
