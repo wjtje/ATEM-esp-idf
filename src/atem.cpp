@@ -122,11 +122,10 @@ void Atem::task_() {
 
       // Send ACK-RESPONSE to test connection
       if (this->Connected()) {
-        auto p = new AtemPacket(0x11, this->session_id_, 12);
-        p->SetId(++this->local_id_);
-        p->SetAckId(this->remote_id_);
-        this->SendPacket_(p);
-        delete p;
+        AtemPacket p = AtemPacket(0x11, this->session_id_, 12);
+        p.SetId(++this->local_id_);
+        p.SetAckId(this->remote_id_);
+        this->SendPacket_(&p);
       }
 
       ack_count++;
@@ -176,9 +175,8 @@ void Atem::task_() {
         this->local_id_ = 0;
         this->remote_id_ = 0;
         this->state_ = ConnectionState::INITIALIZING;
-        AtemPacket *p = new AtemPacket(0x10, packet.GetSessionId(), 12);
-        this->SendPacket_(p);
-        delete p;
+        AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
+        this->SendPacket_(&p);
       } else if (init_status == 0x3) {  // No connection available
         ESP_LOGW(TAG,
                  "Couldn't connect to the atem because it has no connection "
@@ -193,18 +191,17 @@ void Atem::task_() {
         packet.GetFlags() & 0x1 && packet.GetLength() == 12) {
       // Show some basic information about the ATEM
       if (xSemaphoreTake(this->state_mutex_, 100 / portTICK_PERIOD_MS)) {
-        ESP_LOGI(TAG, "Protocol Version: %u.%u", this->ver_.major,
-                 this->ver_.minor);
-        ESP_LOGI(TAG, "Model: %s", this->pid_);
         ESP_LOGI(TAG,
-                 "Topology: ME(%u), sources(%u), dsk(%u), usk(%u), aux(%u)",
-                 this->top_.me, this->top_.sources, this->top_.dsk,
-                 this->top_.usk, this->top_.aux);
+                 "Initialization done\n\t\tModel: %s\n\t\tVersion: %u.%u"
+                 "\n\t\tTopology: ME(%u), sources(%u), dsk(%u), usk(%u), "
+                 "aux(%u)",
+                 this->pid_, this->ver_.major, this->ver_.minor, this->top_.me,
+                 this->top_.sources, this->top_.dsk, this->top_.usk,
+                 this->top_.aux);
 
         xSemaphoreGive(this->state_mutex_);
       }
 
-      ESP_LOGI(TAG, "Initialization done");
       this->session_id_ = packet.GetSessionId();
       this->state_ = ConnectionState::ACTIVE;
 
@@ -236,10 +233,9 @@ void Atem::task_() {
 
       // We don't have this packet, just pretend it was an ACK
       if (!send) {
-        AtemPacket *p = new AtemPacket(0x1, packet.GetSessionId(), 12);
-        p->SetId(packet.GetResendId());
-        this->SendPacket_(p);
-        delete p;
+        AtemPacket p = new AtemPacket(0x1, packet.GetSessionId(), 12);
+        p.SetId(packet.GetResendId());
+        this->SendPacket_(&p);
       }
     }
 
@@ -249,10 +245,9 @@ void Atem::task_() {
 
       // Respond to ACK
       if (this->state_ == ConnectionState::ACTIVE) {
-        AtemPacket *p = new AtemPacket(0x10, packet.GetSessionId(), 12);
-        p->SetAckId(this->remote_id_);
-        this->SendPacket_(p);
-        delete p;
+        AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
+        p.SetAckId(this->remote_id_);
+        this->SendPacket_(&p);
       }
 
       // Check if we are receiving it in order
@@ -265,11 +260,10 @@ void Atem::task_() {
         ESP_LOGE(TAG, "Missing packet %u", missing_id);
 
         // Request missing
-        auto p = new AtemPacket(0x18, this->session_id_, 12);
-        p->SetResendId(missing_id);
-        p->SetAckId(missing_id - 1);  // We received the previous packet
-        this->SendPacket_(p);
-        delete p;
+        AtemPacket p = AtemPacket(0x18, this->session_id_, 12);
+        p.SetResendId(missing_id);
+        p.SetAckId(missing_id - 1);  // We received the previous packet
+        this->SendPacket_(&p);
       }
     }
 
@@ -596,10 +590,9 @@ void Atem::Reconnect_() {
   xSemaphoreGive(this->send_mutex_);
 
   // Send init request
-  AtemPacket *p = new AtemPacket(0x2, this->session_id_, 20);
-  ((uint8_t *)p->GetData())[12] = 0x01;
-  this->SendPacket_(p);
-  delete p;
+  AtemPacket p = AtemPacket(0x2, this->session_id_, 20);
+  ((uint8_t *)p.GetData())[12] = 0x01;
+  this->SendPacket_(&p);
 }
 
 void Atem::SendCommands(std::vector<AtemCommand *> commands) {
