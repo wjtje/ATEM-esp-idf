@@ -93,6 +93,8 @@ Atem::~Atem() {
   delete this->dsk_;
   delete this->aux_out_;
   delete this->mps_;
+  for (std::pair<uint16_t, char *> file : this->mpf_) free(file.second);
+  this->mpf_.clear();
   xSemaphoreGive(this->state_mutex_);
 }
 
@@ -503,6 +505,31 @@ void Atem::task_() {
               .still_index = command.GetData<uint8_t *>()[2],
               .clip_index = command.GetData<uint8_t *>()[3],
           };
+          break;
+        }
+        case ATEM_CMD("MPfe"): {  // Media Pool Frame Description
+          uint8_t type = command.GetData<uint8_t *>()[0];
+          uint16_t index = command.GetDataS<uint16_t>(1);
+          bool is_used = command.GetData<uint8_t *>()[4];
+
+          if (type != 0) break;  // Only work with stills
+          event |= 1 << ATEM_EVENT_MEDIA_POOL;
+
+          // Clear index
+          std::map<uint16_t, char *>::iterator it = this->mpf_.find(index);
+          if (it != this->mpf_.end()) {
+            free((*it).second);
+            this->mpf_.erase(it);
+          }
+
+          // Store file
+          if (is_used) {
+            // Create a copy of the filename
+            uint8_t filename_len = command.GetData<uint8_t *>()[23];
+            char *filename =
+                strndup(command.GetData<char *>() + 24, filename_len);
+            if (filename != nullptr) mpf_.insert({index, filename});
+          }
           break;
         }
         case ATEM_CMD("PrgI"): {  // Program Input

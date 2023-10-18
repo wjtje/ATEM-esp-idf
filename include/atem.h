@@ -59,6 +59,10 @@ enum : int32_t {
    */
   ATEM_EVENT_MEDIA_PLAYER,
   /**
+   * @brief MPfe
+   */
+  ATEM_EVENT_MEDIA_POOL,
+  /**
    * @brief _pin
    */
   ATEM_EVENT_PRODUCT_ID,
@@ -157,6 +161,14 @@ class Atem {
    */
   bool GetMediaPlayerSource(types::MediaPlayerSource* state,
                             uint8_t mediaplayer);
+  /**
+   * @brief Get the map of the Media Player File Names
+   *
+   * @warning Make sure your task has ownership over the atem state
+   *
+   * @return std::map<uint16_t, char*> {index, file name}
+   */
+  std::map<uint16_t, char*> GetMediaPlayerFileName() { return this->mpf_; }
   /**
    * @brief Get the current preview source active on ME
    *
@@ -287,12 +299,13 @@ class Atem {
   types::Topology top_;                     // Topology
   types::ProtocolVersion ver_;              // Protocol version
   types::MediaPlayer mpl_;                  // Media player
-  char pid_[45];                            // Product Id
+  char pid_[45] = {0};                      // Product Id
   types::MixEffectState* me_{nullptr};      // [me]
   types::UskState* usk_{nullptr};           // [me * top_.usk + keyer]
   types::DskState* dsk_{nullptr};           // [keyer]
   types::Source* aux_out_{nullptr};         // Source in aux [aux]
   types::MediaPlayerSource* mps_{nullptr};  // Media player source [mpl]
+  std::map<uint16_t, char*> mpf_;           // Media player file name
 
   TaskHandle_t task_handle_;
   void task_();
