@@ -51,7 +51,7 @@ enum : int32_t {
    */
   ATEM_EVENT_INPUT_PROPERTIES,
   /**
-   * @brief KeBP / KeDV / KeOn
+   * @brief KeBP / KeDV / KeFS / KeOn
    */
   ATEM_EVENT_USK,
   /**
@@ -79,9 +79,13 @@ enum : int32_t {
    */
   ATEM_EVENT_TOPOLOGY,
   /**
-   * @brief TrPs / TrSS
+   * @brief TrPs
    */
-  ATEM_EVENT_TRANSITION,
+  ATEM_EVENT_TRANSITION_POSITION,
+  /**
+   * @brief TrSS
+   */
+  ATEM_EVENT_TRANSITION_STATE,
 };
 
 class Atem {

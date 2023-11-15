@@ -547,7 +547,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("TrPs"): {  // Transition Position
-          event |= 1 << ATEM_EVENT_TRANSITION;
+          event |= 1 << ATEM_EVENT_TRANSITION_POSITION;
           me = command.GetData<uint8_t *>()[0];
           state = command.GetData<uint8_t *>()[1];
           pos = ntohs(command.GetData<uint16_t *>()[2]);
@@ -558,7 +558,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("TrSS"): {  // Transition State
-          event |= 1 << ATEM_EVENT_TRANSITION;
+          event |= 1 << ATEM_EVENT_TRANSITION_STATE;
           me = command.GetData<uint8_t *>()[0];
 
           if (this->me_ == nullptr || this->top_.me - 1 < me) break;
