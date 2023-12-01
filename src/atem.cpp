@@ -235,7 +235,7 @@ void Atem::task_() {
 
       // We don't have this packet, just pretend it was an ACK
       if (!send) {
-        AtemPacket p = new AtemPacket(0x1, packet.GetSessionId(), 12);
+        AtemPacket p = AtemPacket(0x1, packet.GetSessionId(), 12);
         p.SetId(packet.GetResendId());
         this->SendPacket_(&p);
       }
