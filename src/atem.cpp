@@ -593,14 +593,16 @@ esp_err_t Atem::SendPacket_(AtemPacket *packet) {
 
   int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
   if (len != packet->GetLength()) {
-    ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetId());
+    if (this->state_ >= ConnectionState::INITIALIZING)
+      ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetId());
     return ESP_FAIL;
   }
   return ESP_OK;
 }
 
 void Atem::Reconnect_() {
-  ESP_LOGI(TAG, "Reconnecting to ATEM");
+  if (this->state_ != ConnectionState::CONNECTED)
+    ESP_LOGW(TAG, "Reconnecting to ATEM");
 
   // Reset local variables
   this->state_ = ConnectionState::CONNECTED;
