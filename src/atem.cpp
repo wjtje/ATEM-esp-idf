@@ -209,7 +209,9 @@ void Atem::task_() {
 
       // Send event's
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++)
-        if (boot_events & 1 << i) esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
+        if (boot_events & 1 << i)
+          esp_event_post(ATEM_EVENT, i, &this->instance_,
+                         sizeof(this->instance_), 0);
     }
 
     // RESEND request
@@ -574,7 +576,9 @@ void Atem::task_() {
     // Send events
     if (event != 0 && this->state_ == ConnectionState::ACTIVE) {
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & 1 << i) esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
+        if (event & 1 << i)
+          esp_event_post(ATEM_EVENT, i, &this->instance_,
+                         sizeof(this->instance_), 0);
     } else {
       boot_events |= event;
     }
