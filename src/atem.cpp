@@ -9,7 +9,7 @@ Atem *Atem::instance_{nullptr};
 SemaphoreHandle_t Atem::mutex_ = xSemaphoreCreateMutex();
 
 Atem *Atem::GetInstance() {
-  if (xSemaphoreTake(Atem::mutex_, 10 / portTICK_PERIOD_MS)) {
+  if (xSemaphoreTake(Atem::mutex_, pdMS_TO_TICKS(1000))) {
     if (Atem::instance_ == nullptr) Atem::instance_ = new Atem();
     xSemaphoreGive(Atem::mutex_);
     return Atem::instance_;

@@ -1,170 +1,109 @@
 #include "atem.h"
 
+#ifdef CONFIG_ATEM_DEBUG_MUTEX_CHECK
+#define ATEM_MUTEX_OWER_CHECK(func_name)                               \
+  if (xQueuePeek(this->state_mutex_, NULL, 0) == pdTRUE) {             \
+    char* task_name = pcTaskGetName(NULL);                             \
+    ESP_LOGE(TAG, "Task '%s' doesn't have the mutex while calling %s", \
+             task_name, func_name);                                    \
+    return false;                                                      \
+  }
+#else
+#define ATEM_MUTEX_OWER_CHECK(func_name) \
+  {}
+#endif
+
 namespace atem {
 
 bool Atem::GetAuxOutput(types::Source* source, uint8_t channel) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->aux_out_ != nullptr && this->top_.aux > channel) {
-      *source = this->aux_out_[channel];
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetAuxOutput'");
+  ATEM_MUTEX_OWER_CHECK("GetAuxOutput");
+  if (this->aux_out_ != nullptr && this->top_.aux > channel) {
+    *source = this->aux_out_[channel];
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 bool Atem::GetDskState(types::DskState* state, uint8_t keyer) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->dsk_ != nullptr && this->top_.dsk > keyer) {
-      *state = this->dsk_[keyer];
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetDskState'");
+  ATEM_MUTEX_OWER_CHECK("GetDskState");
+  if (this->dsk_ != nullptr && this->top_.dsk > keyer) {
+    *state = this->dsk_[keyer];
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 bool Atem::GetMediaPlayer(types::MediaPlayer* state) {
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    *state = this->mpl_;
-    xSemaphoreGive(this->state_mutex_);
-    return true;
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetMediaPlayer'");
-  }
-
-  return false;
+  ATEM_MUTEX_OWER_CHECK("GetMediaPlayer");
+  *state = this->mpl_;
+  return true;
 }
 
 bool Atem::GetMediaPlayerSource(types::MediaPlayerSource* state,
                                 uint8_t mediaplayer) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->mps_ != nullptr && this->top_.mediaplayers > mediaplayer) {
-      *state = this->mps_[mediaplayer];
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetMediaPlayerSource'");
+  ATEM_MUTEX_OWER_CHECK("GetMediaPlayerSource");
+  if (this->mps_ != nullptr && this->top_.mediaplayers > mediaplayer) {
+    *state = this->mps_[mediaplayer];
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 bool Atem::GetPreviewInput(types::Source* source, uint8_t me) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->me_ != nullptr && this->top_.me > me) {
-      *source = this->me_[me].preview;
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetPreviewInput'");
+  ATEM_MUTEX_OWER_CHECK("GetPreviewInput");
+  if (this->me_ != nullptr && this->top_.me > me) {
+    *source = this->me_[me].preview;
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 bool Atem::GetProgramInput(types::Source* source, uint8_t me) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->me_ != nullptr && this->top_.me > me) {
-      *source = this->me_[me].program;
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetProgramInput'");
+  ATEM_MUTEX_OWER_CHECK("GetProgramInput");
+  if (this->me_ != nullptr && this->top_.me > me) {
+    *source = this->me_[me].program;
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 bool Atem::GetProtocolVersion(types::ProtocolVersion* version) {
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    *version = this->ver_;
-    xSemaphoreGive(this->state_mutex_);
-    return true;
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetProtocolVersion'");
-  }
-
+  ATEM_MUTEX_OWER_CHECK("GetProtocolVersion");
+  *version = this->ver_;
   return true;
 }
 
 bool Atem::GetTopology(types::Topology* topology) {
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    *topology = this->top_;
-    xSemaphoreGive(this->state_mutex_);
-    return true;
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetTopology'");
-  }
-
-  return false;
+  ATEM_MUTEX_OWER_CHECK("GetTopology");
+  *topology = this->top_;
+  return true;
 }
 
 bool Atem::GetTransitionState(types::TransitionState* state, uint8_t me) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->me_ != nullptr && this->top_.me > me) {
-      *state = this->me_[me].trst_;
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetTransitionState'");
+  ATEM_MUTEX_OWER_CHECK("GetTransitionState");
+  if (this->me_ != nullptr && this->top_.me > me) {
+    *state = this->me_[me].trst_;
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 bool Atem::GetUskState(types::UskState* state, uint8_t keyer, uint8_t me) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->usk_ != nullptr && this->top_.me > me && this->top_.usk > keyer) {
-      *state = this->usk_[me * this->top_.usk + keyer];
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetUskState'");
+  ATEM_MUTEX_OWER_CHECK("GetUskState");
+  if (this->usk_ != nullptr && this->top_.me > me && this->top_.usk > keyer) {
+    *state = this->usk_[me * this->top_.usk + keyer];
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 bool Atem::GetUskOnAir(bool* state, uint8_t keyer, uint8_t me) {
-  bool valid = false;
-
-  if (xSemaphoreTake(this->state_mutex_, 20 / portTICK_PERIOD_MS)) {
-    if (this->me_ != nullptr && this->top_.me > me && this->top_.usk > keyer) {
-      *state = this->me_[me].usk_on_air & (0x1 << keyer);
-      valid = true;
-    }
-    xSemaphoreGive(this->state_mutex_);
-  } else {
-    ESP_LOGD(TAG, "Failed to lock mutex for 'GetUskOnAir'");
+  ATEM_MUTEX_OWER_CHECK("GetUskOnAir");
+  if (this->me_ != nullptr && this->top_.me > me && this->top_.usk > keyer) {
+    *state = this->me_[me].usk_on_air & (0x1 << keyer);
+    return true;
   }
-
-  return valid;
+  return false;
 }
 
 }  // namespace atem

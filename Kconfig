@@ -4,4 +4,8 @@ menu "ATEM Communication"
     int "Size of the internal buffer to store a packet"
     default 1600
 
+  config ATEM_DEBUG_MUTEX_CHECK
+    bool "Check the atem mutex is locked before running function that requires it"
+    default 0
+
 endmenu
