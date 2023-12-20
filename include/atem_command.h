@@ -3,10 +3,8 @@
  * @author Wouter van der Wal (me@wjtje.dev)
  * @brief Provides all the different command that can be send by or send to an
  * ATEM.
- * @version 0.1
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal.
- *
+ * @copyright Copyright (c) 2023 - Wouter van der Wal
  */
 #pragma once
 #include <lwip/inet.h>

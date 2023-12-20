@@ -1,5 +1,7 @@
 #include "atem.h"
 
+static const char* TAG{"AtemState"};
+
 #ifdef CONFIG_ATEM_DEBUG_MUTEX_CHECK
 #define ATEM_MUTEX_OWER_CHECK(func_name)                               \
   if (xQueuePeek(this->state_mutex_, NULL, 0) == pdTRUE) {             \

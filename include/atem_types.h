@@ -2,10 +2,8 @@
  * @file atem_types.h
  * @author Wouter van der Wal (me@wjtje.dev)
  * @brief Provides different types used by other parts of the protocol.
- * @version 0.1
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal.
- *
+ * @copyright Copyright (c) 2023 - Wouter van der Wal
  */
 #pragma once
 

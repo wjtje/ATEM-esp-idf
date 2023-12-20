@@ -2,10 +2,8 @@
  * @file atem.h
  * @author Wouter van der Wal (me@wjtje.dev)
  * @brief Provides the main class that used to communicate to an ATEM.
- * @version 0.1
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal.
- *
+ * @copyright Copyright (c) 2023 - Wouter van der Wal
  */
 #pragma once
 #include <arpa/inet.h>
@@ -24,11 +22,9 @@
 #include "atem_command.h"
 #include "atem_packet.h"
 #include "atem_types.h"
-#include "config_manager.h"
 
 namespace atem {
 
-extern const char* TAG;
 ESP_EVENT_DECLARE_BASE(ATEM_EVENT);
 
 /**
@@ -90,7 +86,13 @@ enum : int32_t {
 
 class Atem {
  public:
-  static Atem* GetInstance();
+  /**
+   * @brief Create a new connection to the ATEM
+   *
+   * @param address The address of the ATEM to connect to
+   */
+  Atem(const char* address);
+  ~Atem();
 
   /**
    * @brief Returns if the atem connection is active or not
@@ -258,28 +260,6 @@ class Atem {
   void SendCommands(std::vector<AtemCommand*> commands);
 
  protected:
-  Atem();
-  ~Atem();
-
-  // Singleton
-  static Atem* instance_;
-  static SemaphoreHandle_t mutex_;
-
-  // Config
-  class Config : public config_manager::Config {
-   public:
-    sockaddr* GetAddress() { return (struct sockaddr*)&this->addr_; }
-
-   protected:
-    esp_err_t Decode_(cJSON* json);
-
-    sockaddr_in addr_;
-  };
-  Config config_;
-
-  // Repl command
-  static esp_err_t repl_();
-
   int sockfd_;
 
   // Connection state

@@ -3,10 +3,8 @@
  * @author Wouter van der Wal (me@wjtje.dev)
  * @brief Contains function to parse a UDP packet create by an ATEM or create a
  * valid one.
- * @version 0.1
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal.
- *
+ * @copyright Copyright (c) 2023 - Wouter van der Wal
  */
 #pragma once
 #include <cstring>

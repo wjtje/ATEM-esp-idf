@@ -2,78 +2,74 @@
 
 namespace atem {
 
-const char *TAG{"ATEM"};
+static const char *TAG{"Atem"};
 ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
 
-Atem *Atem::instance_{nullptr};
-SemaphoreHandle_t Atem::mutex_ = xSemaphoreCreateMutex();
-
-Atem *Atem::GetInstance() {
-  if (xSemaphoreTake(Atem::mutex_, pdMS_TO_TICKS(1000))) {
-    if (Atem::instance_ == nullptr) Atem::instance_ = new Atem();
-    xSemaphoreGive(Atem::mutex_);
-    return Atem::instance_;
-  }
-  return nullptr;
-}
-
-esp_err_t Atem::Config::Decode_(cJSON *json) {
-  cJSON_GetObjectCheck(json, atem, Object);
-
-  cJSON_GetObjectCheck(atem_obj, ip, String);
-  if (!ip4addr_aton(ip_obj->valuestring, (ip4_addr_t *)&this->addr_.sin_addr)) {
-    ESP_LOGE(TAG, "Expected key 'ip' to be a valid ip4 adress");
-    return ESP_FAIL;
-  }
-
-  this->addr_.sin_port = htons(9910);
-  this->addr_.sin_family = AF_INET;
-
-  return ESP_OK;
-}
-
-Atem::Atem() {
-  ESP_ERROR_CHECK_WITHOUT_ABORT(
-      config_manager::ConfigManager::Restore(&this->config_));
-
+Atem::Atem(const char *address) {
   // Clear variables
   memset(&this->top_, 0, sizeof(this->top_));
   memset(&this->ver_, 0, sizeof(this->ver_));
   memset(&this->mpl_, 0, sizeof(this->mpl_));
 
-  // Create socket
-  int status;
-  this->sockfd_ = socket(AF_UNSPEC, SOCK_DGRAM, AF_INET);
-  if ((status = connect(this->sockfd_, this->config_.GetAddress(),
-                        sizeof *this->config_.GetAddress())) != 0) {
-    ESP_LOGE(TAG, "Failed to connect to adress (%s)", strerror(status));
+  // Try to create a socket
+  struct addrinfo hints, *servinfo, *p;
+  int rv;
+
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;  // IPv4
+  hints.ai_socktype = SOCK_DGRAM;
+
+  if ((rv = getaddrinfo(address, "9910", &hints, &servinfo)) != 0) {
+    ESP_LOGE(TAG, "Failed to get address info");
+    abort();
   }
+
+  for (p = servinfo; p != NULL; p = p->ai_next) {
+    if ((this->sockfd_ =
+             socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
+      continue;
+
+    if (connect(this->sockfd_, p->ai_addr, p->ai_addrlen) == -1) {
+      close(this->sockfd_);
+      continue;
+    }
+
+    break;
+  }
+
+  if (p == NULL) {
+    ESP_LOGE(TAG, "Failed to connect to ATEM");
+    abort();
+  }
+
+  freeaddrinfo(servinfo);
 
   // Set socket timeout
   struct timeval timeout;
   timeout.tv_sec = 1;
   timeout.tv_usec = 0;
-  if ((status = setsockopt(this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-                           sizeof timeout)) != 0) {
-    ESP_LOGE(TAG, "Failed to setsockopt (%s)", strerror(status));
+  if ((rv = setsockopt(this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                       sizeof timeout)) != 0) {
+    ESP_LOGE(TAG, "Failed to setsockopt (%s)", strerror(rv));
   }
 
   // Pre allocate send vector
-  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
-  this->send_packets_.reserve(34);
-  xSemaphoreGive(this->send_mutex_);
+  if (xSemaphoreTake(this->send_mutex_, pdMS_TO_TICKS(50))) {
+    this->send_packets_.reserve(34);
+    xSemaphoreGive(this->send_mutex_);
+  } else {
+    ESP_LOGE(TAG, "Failed to pre allocate send packet buffer");
+  }
 
   // Create background task
-  if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem", 5120,
-                            this, configMAX_PRIORITIES, &this->task_handle_))) {
+  if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem",
+                            5 * 1024, this, configMAX_PRIORITIES,
+                            &this->task_handle_))) {
     ESP_LOGE(TAG, "Failed to create task");
     abort();
   }
 
   this->Reconnect_();
-
-  // Register repl
-  ESP_ERROR_CHECK_WITHOUT_ABORT(this->repl_());
 }
 
 Atem::~Atem() {
@@ -209,9 +205,10 @@ void Atem::task_() {
 
       // Send event's
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++)
-        if (boot_events & 1 << i)
-          esp_event_post(ATEM_EVENT, i, &this->instance_,
-                         sizeof(this->instance_), 0);
+        if (boot_events & 1 << i) {
+          Atem *instance = this;
+          esp_event_post(ATEM_EVENT, i, &instance, sizeof(instance), 0);
+        }
     }
 
     // RESEND request
@@ -576,9 +573,10 @@ void Atem::task_() {
     // Send events
     if (event != 0 && this->state_ == ConnectionState::ACTIVE) {
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & 1 << i)
-          esp_event_post(ATEM_EVENT, i, &this->instance_,
-                         sizeof(this->instance_), 0);
+        if (event & 1 << i) {
+          Atem *instance = this;
+          esp_event_post(ATEM_EVENT, i, &instance, sizeof(instance), 0);
+        }
     } else {
       boot_events |= event;
     }
