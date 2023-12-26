@@ -626,13 +626,7 @@ void Atem::Reconnect_() {
   this->SendPacket_(&p);
 }
 
-void Atem::SendCommands(std::vector<AtemCommand *> commands) {
-  types::ProtocolVersion protocol_version;
-
-  xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
-  protocol_version = this->ver_;
-  xSemaphoreGive(this->state_mutex_);
-
+esp_err_t Atem::SendCommands(std::vector<AtemCommand *> commands) {
   // Get the length of the commands
   uint16_t length = 12;  // Packet header
   uint16_t amount = 0;
@@ -653,7 +647,7 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   uint16_t i = 12;
   for (auto c : commands) {
     if (unlikely(c == nullptr)) continue;
-    c->PrepairCommand(protocol_version);
+    c->PrepairCommand(this->ver_);
     memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
     i += c->GetLength();
     delete c;
@@ -663,18 +657,22 @@ void Atem::SendCommands(std::vector<AtemCommand *> commands) {
   this->SendPacket_(packet);
 
   // Store packet in send_packets_
-  if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
+  if (xSemaphoreTake(this->send_mutex_, pdMS_TO_TICKS(20))) {
     if (this->send_packets_.size() < 33) {
       this->send_packets_.push_back(packet);
-    } else {
-      ESP_LOGW(TAG, "Failed to store packet");
-      delete packet;
+      xSemaphoreGive(this->send_mutex_);
+      return ESP_OK;
     }
-    xSemaphoreGive(this->send_mutex_);
-  } else {
-    ESP_LOGW(TAG, "Failed to store packet");
+
+    ESP_LOGW(TAG, "Failed to store packet (QUEUE FULL)");
     delete packet;
+    xSemaphoreGive(this->send_mutex_);
+    return ESP_ERR_NO_MEM;
   }
+
+  ESP_LOGW(TAG, "Failed to store packet (MUTEX FAIL)");
+  delete packet;
+  return ESP_ERR_TIMEOUT;
 }
 
 int16_t Atem::CheckOrder_(int16_t id) {

@@ -256,8 +256,10 @@ class Atem {
    * @endcode
    *
    * @param commands
+   *
+   * @return If the packet was send (added to queue) successfully
    */
-  void SendCommands(std::vector<AtemCommand*> commands);
+  esp_err_t SendCommands(std::vector<AtemCommand*> commands);
 
  protected:
   int sockfd_;
