@@ -7,7 +7,6 @@
  */
 #pragma once
 #include <arpa/inet.h>
-#include <esp_console.h>
 #include <esp_event.h>
 #include <esp_log.h>
 #include <freertos/task.h>
