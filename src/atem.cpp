@@ -636,7 +636,7 @@ esp_err_t Atem::SendCommands(std::vector<AtemCommand *> commands) {
     amount++;
   }
 
-  if (length == 12) return;  // Don't send empty commands
+  if (length == 12) return ESP_OK;  // Don't send empty commands
   ESP_LOGD(TAG, "Sending %u commands", amount);
 
   // Create the packet
