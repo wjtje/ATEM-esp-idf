@@ -8,4 +8,8 @@ menu "ATEM Communication"
     bool "Check the atem mutex is locked before running function that requires it"
     default 0
 
+  config ATEM_STORE_SEND
+    bool "Store send packages, this increases memory usage but improves stability on buggy networks"
+    default 1
+
 endmenu

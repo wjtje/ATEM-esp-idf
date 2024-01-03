@@ -19,9 +19,9 @@ namespace atem {
  */
 class AtemPacket {
  public:
-  AtemPacket(void* dataptr);
+  AtemPacket(void* data) : has_alloc_(false), data_(data) {}
   AtemPacket(uint8_t flags, uint16_t session, uint16_t length);
-  ~AtemPacket() { free(this->data_); }
+  ~AtemPacket();
 
   /**
    * @brief Get access to the raw data buffer, advance use only
@@ -110,6 +110,7 @@ class AtemPacket {
   Iterator end() { return Iterator(this->data_, this->GetLength()); }
 
  protected:
+  bool has_alloc_{true};
   void* data_{nullptr};
 };
 

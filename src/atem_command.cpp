@@ -9,7 +9,9 @@ AtemCommand::AtemCommand(const char *cmd, uint16_t length) {
 }
 
 AtemCommand::~AtemCommand() {
-  if (this->has_alloc_) free(this->data_);
+  if (this->has_alloc_) {
+    free(this->data_);
+  }
 }
 
 }  // namespace atem

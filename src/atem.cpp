@@ -54,12 +54,14 @@ Atem::Atem(const char *address) {
   }
 
   // Pre allocate send vector
+#if CONFIG_ATEM_STORE_SEND
   if (xSemaphoreTake(this->send_mutex_, pdMS_TO_TICKS(50))) {
     this->send_packets_.reserve(34);
     xSemaphoreGive(this->send_mutex_);
   } else {
     ESP_LOGE(TAG, "Failed to pre allocate send packet buffer");
   }
+#endif
 
   // Create background task
   if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem",
@@ -76,10 +78,12 @@ Atem::~Atem() {
   vTaskDelete(this->task_handle_);
 
   // Clear cached packages
+#if CONFIG_ATEM_STORE_SEND
   xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
   for (auto p : this->send_packets_) delete p;
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
+#endif
 
   // Clear memory
   xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
@@ -187,27 +191,14 @@ void Atem::task_() {
     // INIT packets complete
     if (this->state_ == ConnectionState::INITIALIZING &&
         packet.GetFlags() & 0x1 && packet.GetLength() == 12) {
-      // Show some basic information about the ATEM
-      if (xSemaphoreTake(this->state_mutex_, 100 / portTICK_PERIOD_MS)) {
-        ESP_LOGI(TAG,
-                 "Initialization done\n\t\tModel: %s\n\t\tVersion: %u.%u"
-                 "\n\t\tTopology: ME(%u), sources(%u), dsk(%u), usk(%u), "
-                 "aux(%u)",
-                 this->pid_, this->ver_.major, this->ver_.minor, this->top_.me,
-                 this->top_.sources, this->top_.dsk, this->top_.usk,
-                 this->top_.aux);
-
-        xSemaphoreGive(this->state_mutex_);
-      }
-
+      ESP_LOGI(TAG, "Initialization done");
       this->session_id_ = packet.GetSessionId();
       this->state_ = ConnectionState::ACTIVE;
 
       // Send event's
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++)
         if (boot_events & 1 << i) {
-          Atem *instance = this;
-          esp_event_post(ATEM_EVENT, i, &instance, sizeof(instance), 0);
+          esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
         }
     }
 
@@ -217,6 +208,7 @@ void Atem::task_() {
       bool send = false;
 
       // Try to find the packet
+#if CONFIG_ATEM_STORE_SEND
       if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
         int16_t id = packet.GetId();
         for (int i = 0; AtemPacket * p : this->send_packets_) {
@@ -231,6 +223,7 @@ void Atem::task_() {
 
         xSemaphoreGive(this->send_mutex_);
       }
+#endif
 
       // We don't have this packet, just pretend it was an ACK
       if (!send) {
@@ -268,6 +261,7 @@ void Atem::task_() {
       }
     }
 
+#if CONFIG_ATEM_STORE_SEND
     // Receive ACK
     if (packet.GetFlags() & 0x10 && this->state_ == ConnectionState::ACTIVE) {
       if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
@@ -300,6 +294,7 @@ void Atem::task_() {
         ESP_LOGW(TAG, "Failed to note of ACK");
       }
     }
+#endif
 
     // Check size of packet
     if (len <= 12 || packet.GetFlags() & 0x2) continue;
@@ -573,10 +568,7 @@ void Atem::task_() {
     // Send events
     if (event != 0 && this->state_ == ConnectionState::ACTIVE) {
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & 1 << i) {
-          Atem *instance = this;
-          esp_event_post(ATEM_EVENT, i, &instance, sizeof(instance), 0);
-        }
+        if (event & 1 << i) esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
     } else {
       boot_events |= event;
     }
@@ -615,10 +607,12 @@ void Atem::Reconnect_() {
   this->session_id_ = 0x0B06;
 
   // Remove all packets
+#if CONFIG_ATEM_STORE_SEND
   xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
   for (auto p : this->send_packets_) delete p;
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
+#endif
 
   // Send init request
   AtemPacket p = AtemPacket(0x2, this->session_id_, 20);
@@ -626,7 +620,7 @@ void Atem::Reconnect_() {
   this->SendPacket_(&p);
 }
 
-esp_err_t Atem::SendCommands(std::vector<AtemCommand *> commands) {
+esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
   // Get the length of the commands
   uint16_t length = 12;  // Packet header
   uint16_t amount = 0;
@@ -636,8 +630,8 @@ esp_err_t Atem::SendCommands(std::vector<AtemCommand *> commands) {
     amount++;
   }
 
-  if (length == 12) return ESP_OK;  // Don't send empty commands
-  ESP_LOGD(TAG, "Sending %u commands", amount);
+  if (length == 12) return ESP_ERR_INVALID_ARG;  // Don't send empty commands
+  ESP_LOGD(TAG, "Sending %u commands (%u bytes)", amount, length);
 
   // Create the packet
   AtemPacket *packet = new AtemPacket(0x1, this->session_id_, length);
@@ -653,12 +647,21 @@ esp_err_t Atem::SendCommands(std::vector<AtemCommand *> commands) {
     delete c;
   }
 
-  // Send the packet
-  this->SendPacket_(packet);
+  if (unlikely(i != length)) {
+    delete packet;
+    return ESP_FAIL;
+  }
 
+  // Send the packet
+  if (this->SendPacket_(packet) != ESP_OK) {
+    delete packet;
+    return ESP_FAIL;
+  }
+
+#if CONFIG_ATEM_STORE_SEND
   // Store packet in send_packets_
-  if (xSemaphoreTake(this->send_mutex_, pdMS_TO_TICKS(20))) {
-    if (this->send_packets_.size() < 33) {
+  if (xSemaphoreTake(this->send_mutex_, pdMS_TO_TICKS(10))) {
+    if (this->send_packets_.size() < 32) {
       this->send_packets_.push_back(packet);
       xSemaphoreGive(this->send_mutex_);
       return ESP_OK;
@@ -673,6 +676,10 @@ esp_err_t Atem::SendCommands(std::vector<AtemCommand *> commands) {
   ESP_LOGW(TAG, "Failed to store packet (MUTEX FAIL)");
   delete packet;
   return ESP_ERR_TIMEOUT;
+#else
+  delete packet;
+  return ESP_OK;
+#endif
 }
 
 int16_t Atem::CheckOrder_(int16_t id) {

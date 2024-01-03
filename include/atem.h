@@ -258,7 +258,7 @@ class Atem {
    *
    * @return If the packet was send (added to queue) successfully
    */
-  esp_err_t SendCommands(std::vector<AtemCommand*> commands);
+  esp_err_t SendCommands(const std::vector<AtemCommand*>& commands);
 
  protected:
   int sockfd_;
@@ -274,9 +274,11 @@ class Atem {
   int16_t offset_{1};
   uint32_t received_{0xFFFFFFFE};
 
-  // Packets send
+// Packets send
+#if CONFIG_ATEM_STORE_SEND
   SemaphoreHandle_t send_mutex_{xSemaphoreCreateMutex()};
   std::vector<AtemPacket*> send_packets_;
+#endif
 
   // ATEM state
   SemaphoreHandle_t state_mutex_{xSemaphoreCreateMutex()};
