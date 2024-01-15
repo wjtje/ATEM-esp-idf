@@ -1,8 +1,7 @@
 #include "atem.h"
 
-static const char* TAG{"AtemState"};
-
 #ifdef CONFIG_ATEM_DEBUG_MUTEX_CHECK
+static const char* TAG{"AtemState"};
 #define ATEM_MUTEX_OWER_CHECK(func_name)                               \
   if (xQueuePeek(this->state_mutex_, NULL, 0) == pdTRUE) {             \
     char* task_name = pcTaskGetName(NULL);                             \
@@ -84,7 +83,7 @@ bool Atem::GetTopology(types::Topology* topology) {
 bool Atem::GetTransitionState(types::TransitionState* state, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK("GetTransitionState");
   if (this->me_ != nullptr && this->top_.me > me) {
-    *state = this->me_[me].trst_;
+    *state = this->me_[me].transition;
     return true;
   }
   return false;
@@ -92,8 +91,18 @@ bool Atem::GetTransitionState(types::TransitionState* state, uint8_t me) {
 
 bool Atem::GetUskState(types::UskState* state, uint8_t keyer, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK("GetUskState");
-  if (this->usk_ != nullptr && this->top_.me > me && this->top_.usk > keyer) {
-    *state = this->usk_[me * this->top_.usk + keyer];
+  if (this->me_ != nullptr && this->top_.me > me &&
+      this->me_[me].num_keyers > keyer) {
+    *state = *(this->me_[me].keyer + keyer);
+    return true;
+  }
+  return false;
+}
+
+bool Atem::GetUskNumber(uint8_t* number, uint8_t me) {
+  ATEM_MUTEX_OWER_CHECK("GetUskNumber");
+  if (this->me_ != nullptr && this->top_.me > me) {
+    *number = this->me_[me].num_keyers;
     return true;
   }
   return false;
@@ -101,7 +110,7 @@ bool Atem::GetUskState(types::UskState* state, uint8_t keyer, uint8_t me) {
 
 bool Atem::GetUskOnAir(bool* state, uint8_t keyer, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK("GetUskOnAir");
-  if (this->me_ != nullptr && this->top_.me > me && this->top_.usk > keyer) {
+  if (this->me_ != nullptr && this->top_.me > me && 16 > keyer) {
     *state = this->me_[me].usk_on_air & (0x1 << keyer);
     return true;
   }

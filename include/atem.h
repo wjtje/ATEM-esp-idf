@@ -234,6 +234,15 @@ class Atem {
    */
   bool GetUskState(types::UskState* state, uint8_t keyer = 0, uint8_t me = 0);
   /**
+   * @brief Get the number of Usk on a given ME
+   *
+   * @param number A variable that will store the result
+   * @param me Which ME to use, default to 0
+   *
+   * @return Weather or not the variable is valid
+   */
+  bool GetUskNumber(uint8_t* number, uint8_t me = 0);
+  /**
    * @brief Get the Usk Dve Properties object
    *
    * @param state A variable that will store the current state

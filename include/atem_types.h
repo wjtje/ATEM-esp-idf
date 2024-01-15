@@ -128,12 +128,14 @@ struct Topology {
   uint8_t aux;
   uint8_t mixminus_outputs;
   uint8_t mediaplayers;
-  // uint8_t multiviewers;
+  uint8_t multiviewers;
   uint8_t rs485;
   uint8_t hyperdecks;
-  uint8_t usk;
+  uint8_t dve;
   uint8_t stingers;
   uint8_t supersources;
+  uint8_t talkback_channels;
+  uint8_t camera_control;
 };
 
 enum class UskDveKeyFrame : uint8_t { A = 1, B, FULL, RUN_TO_INF };
@@ -164,13 +166,6 @@ struct MediaPlayerSource {
   uint8_t clip_index;
 };
 
-struct MixEffectState {
-  Source program;
-  Source preview;
-  uint16_t usk_on_air;
-  TransitionState trst_;
-};
-
 struct UskState {
   uint8_t type;
   Source fill;
@@ -190,6 +185,15 @@ struct DskState {
   bool is_auto_transitioning;
   Source fill;
   Source key;
+};
+
+struct MixEffectState {
+  Source program;
+  Source preview;
+  uint16_t usk_on_air;
+  TransitionState transition;
+  uint8_t num_keyers;
+  UskState *keyer;
 };
 
 }  // namespace types

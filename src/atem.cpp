@@ -88,7 +88,13 @@ Atem::~Atem() {
   // Clear memory
   xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
   this->input_properties_.clear();
-  delete this->me_;
+  // Clear ME (and the keyer state)
+  if (this->me_ != nullptr) {
+    for (int i = 0; i < this->top_.me; i++) {
+      if (this->me_[i].keyer != nullptr) free(this->me_[i].keyer);
+    }
+    free(this->me_);
+  }
   delete this->usk_;
   delete this->dsk_;
   delete this->aux_out_;
@@ -308,7 +314,6 @@ void Atem::task_() {
     size_t len;
     types::Source source;
     types::UskState *usk_state;
-    types::UskDveProperties *dve_properties;
 
     // Lock access to the state
     if (!xSemaphoreTake(this->state_mutex_, 150 / portTICK_PERIOD_MS)) {
@@ -328,6 +333,18 @@ void Atem::task_() {
           this->mpl_.clip = command.GetData<uint8_t *>()[1];
           break;
         }
+        case ATEM_CMD("_MeC"): {  // Mix Effect Config
+          event |= 1 << ATEM_EVENT_TOPOLOGY;
+          uint8_t me = command.GetData(0);
+          uint8_t num_keyer = command.GetData(1);
+
+          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
+
+          this->me_[me].num_keyers = num_keyer;
+          this->me_[me].keyer =
+              (types::UskState *)calloc(num_keyer, sizeof(types::UskState));
+          break;
+        }
         case ATEM_CMD("_ver"): {  // Protocol version
           event |= 1 << ATEM_EVENT_PROTOCOL_VERSION;
           this->ver_ = {.major = ntohs(command.GetData<uint16_t *>()[0]),
@@ -345,18 +362,38 @@ void Atem::task_() {
         }
         case ATEM_CMD("_top"): {  // Topology
           event |= 1 << ATEM_EVENT_TOPOLOGY;
-          memcpy(&this->top_, command.GetData<void *>(), sizeof(this->top_));
+
+          // Clear allocated memeory
+          if (this->me_ != nullptr) {
+            for (int i = 0; i < this->top_.me; i++) {
+              if (this->me_[i].keyer != nullptr) free(this->me_[i].keyer);
+            }
+            free(this->me_);
+          }
+
+          this->top_.me = command.GetData(0);
+          this->top_.sources = command.GetData(1);
+          this->top_.dsk = command.GetData(2);
+          this->top_.aux = command.GetData(3);
+          this->top_.mixminus_outputs = command.GetData(4);
+          this->top_.mediaplayers = command.GetData(5);
+          this->top_.multiviewers = command.GetData(6);
+          this->top_.rs485 = command.GetData(7);
+          this->top_.hyperdecks = command.GetData(8);
+          this->top_.dve = command.GetData(9);
+          this->top_.stingers = command.GetData(10);
+          this->top_.supersources = command.GetData(11);
+          this->top_.talkback_channels = command.GetData(13);
+          this->top_.camera_control = command.GetData(18);
 
           // Clear memory
-          delete this->me_;
-          delete this->usk_;
           delete this->dsk_;
           delete this->aux_out_;
           delete this->mps_;
 
           // Allocate buffers
-          this->me_ = new types::MixEffectState[this->top_.me];
-          this->usk_ = new types::UskState[this->top_.me * this->top_.usk];
+          this->me_ = (atem::types::MixEffectState *)calloc(
+              this->top_.me, sizeof(types::MixEffectState));
           this->dsk_ = new types::DskState[this->top_.dsk];
           this->aux_out_ = new types::Source[this->top_.aux];
           this->mps_ = new types::MediaPlayerSource[this->top_.mediaplayers];
@@ -428,11 +465,11 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->usk_ == nullptr || this->top_.me - 1 < me ||
-              this->top_.usk - 1 < keyer)
+          if (this->me_ == nullptr || this->top_.me - 1 < me ||
+              this->me_[me].num_keyers - 1 < keyer)
             break;
 
-          usk_state = &this->usk_[me * this->top_.usk + keyer];
+          usk_state = this->me_[me].keyer + keyer;
           usk_state->type = command.GetData<uint8_t *>()[2];
           usk_state->fill =
               (types::Source)ntohs(command.GetData<uint16_t *>()[3]);
@@ -450,16 +487,17 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->usk_ == nullptr || this->top_.me - 1 < me ||
-              this->top_.usk - 1 < keyer)
+          if (this->me_ == nullptr || this->top_.me - 1 < me ||
+              this->me_[me].num_keyers - 1 < keyer)
             break;
 
-          dve_properties = &this->usk_[me * this->top_.usk + keyer].dve_;
-          dve_properties->size_x = ntohl(command.GetData<uint32_t *>()[1]);
-          dve_properties->size_y = ntohl(command.GetData<uint32_t *>()[2]);
-          dve_properties->pos_x = ntohl(command.GetData<uint32_t *>()[3]);
-          dve_properties->pos_y = ntohl(command.GetData<uint32_t *>()[4]);
-          dve_properties->rotation = ntohl(command.GetData<uint32_t *>()[5]);
+          (this->me_[me].keyer + keyer)->dve_ = {
+              .size_x = (int)ntohl(command.GetData<uint32_t *>()[1]),
+              .size_y = (int)ntohl(command.GetData<uint32_t *>()[2]),
+              .pos_x = (int)ntohl(command.GetData<uint32_t *>()[3]),
+              .pos_y = (int)ntohl(command.GetData<uint32_t *>()[4]),
+              .rotation = (int)ntohl(command.GetData<uint32_t *>()[5]),
+          };
           break;
         }
         case ATEM_CMD("KeFS"): {  // Key Fly State
@@ -468,11 +506,11 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->usk_ == nullptr || this->top_.me - 1 < me ||
-              this->top_.usk - 1 < keyer)
+          if (this->me_ == nullptr || this->top_.me - 1 < me ||
+              this->me_[me].num_keyers - 1 < keyer)
             break;
 
-          this->usk_[me * this->top_.usk + keyer].at_key_frame =
+          (this->me_[me].keyer + keyer)->at_key_frame =
               command.GetData<uint8_t *>()[6];
           break;
         }
@@ -547,8 +585,8 @@ void Atem::task_() {
           pos = ntohs(command.GetData<uint16_t *>()[2]);
 
           if (this->me_ == nullptr || this->top_.me - 1 < me) break;
-          this->me_[me].trst_.in_transition = (bool)(state & 0x01);
-          this->me_[me].trst_.position = pos;
+          this->me_[me].transition.in_transition = (bool)(state & 0x01);
+          this->me_[me].transition.position = pos;
           break;
         }
         case ATEM_CMD("TrSS"): {  // Transition State
@@ -556,8 +594,8 @@ void Atem::task_() {
           me = command.GetData<uint8_t *>()[0];
 
           if (this->me_ == nullptr || this->top_.me - 1 < me) break;
-          this->me_[me].trst_.style = command.GetData<uint8_t *>()[1];
-          this->me_[me].trst_.next = command.GetData<uint8_t *>()[2];
+          this->me_[me].transition.style = command.GetData<uint8_t *>()[1];
+          this->me_[me].transition.next = command.GetData<uint8_t *>()[2];
           break;
         }
       }
@@ -575,7 +613,7 @@ void Atem::task_() {
   }
 
   vTaskDelete(nullptr);
-}
+}  // namespace atem
 
 esp_err_t Atem::SendPacket_(AtemPacket *packet) {
   ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),

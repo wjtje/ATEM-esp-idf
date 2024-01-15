@@ -73,6 +73,13 @@ class AtemCommand {
     return (T)((uint8_t *)this->data_ + 8);
   }
   /**
+   * @brief Get the data from the command (excluding the header)
+   *
+   * @param i
+   * @return The byte at i position
+   */
+  uint8_t GetData(size_t i) { return ((uint8_t *)this->data_)[8 + i]; }
+  /**
    * @brief Get the data from the command (excluding the header), short (2
    * bytes) allinged. This function auto converts from network order to host
    * order.
