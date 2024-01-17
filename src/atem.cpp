@@ -94,11 +94,18 @@ Atem::~Atem() {
       if (this->me_[i].keyer != nullptr) free(this->me_[i].keyer);
     }
     free(this->me_);
+    this->me_ = nullptr;
   }
-  delete this->usk_;
-  delete this->dsk_;
+  if (this->dsk_ != nullptr) {
+    free(this->dsk_);
+    this->dsk_ = nullptr;
+  }
   delete this->aux_out_;
   delete this->mps_;
+  if (this->mps_ != nullptr) {
+    free(this->mps_);
+    this->mps_ = nullptr;
+  }
   for (std::pair<uint16_t, char *> file : this->mpf_) free(file.second);
   this->mpf_.clear();
   xSemaphoreGive(this->state_mutex_);
@@ -387,16 +394,18 @@ void Atem::task_() {
           this->top_.camera_control = command.GetData(18);
 
           // Clear memory
-          delete this->dsk_;
+          if (this->dsk_ != nullptr) free(this->dsk_);
           delete this->aux_out_;
-          delete this->mps_;
+          if (this->mps_ != nullptr) free(this->mps_);
 
           // Allocate buffers
           this->me_ = (atem::types::MixEffectState *)calloc(
               this->top_.me, sizeof(types::MixEffectState));
-          this->dsk_ = new types::DskState[this->top_.dsk];
+          this->dsk_ = (types::DskState *)calloc(this->top_.dsk,
+                                                 sizeof(types::DskState));
           this->aux_out_ = new types::Source[this->top_.aux];
-          this->mps_ = new types::MediaPlayerSource[this->top_.mediaplayers];
+          this->mps_ = (types::MediaPlayerSource *)calloc(
+              this->top_.mediaplayers, sizeof(types::MediaPlayerSource));
           break;
         }
         case ATEM_CMD("AuxS"): {  // AUX Select

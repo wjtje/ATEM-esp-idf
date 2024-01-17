@@ -297,7 +297,6 @@ class Atem {
   types::MediaPlayer mpl_;                  // Media player
   char pid_[45] = {0};                      // Product Id
   types::MixEffectState* me_{nullptr};      // [me]
-  types::UskState* usk_{nullptr};           // [me * top_.usk + keyer]
   types::DskState* dsk_{nullptr};           // [keyer]
   types::Source* aux_out_{nullptr};         // Source in aux [aux]
   types::MediaPlayerSource* mps_{nullptr};  // Media player source [mpl]
