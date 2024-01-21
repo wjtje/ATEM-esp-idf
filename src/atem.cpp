@@ -56,7 +56,7 @@ Atem::Atem(const char *address) {
   // Pre allocate send vector
 #if CONFIG_ATEM_STORE_SEND
   if (xSemaphoreTake(this->send_mutex_, pdMS_TO_TICKS(50))) {
-    this->send_packets_.reserve(34);
+    this->send_packets_.reserve(32);
     xSemaphoreGive(this->send_mutex_);
   } else {
     ESP_LOGE(TAG, "Failed to pre allocate send packet buffer");
@@ -260,16 +260,14 @@ void Atem::task_() {
       // Check if we are receiving it in order
       int16_t missing_id = this->CheckOrder_(packet.GetId());
       if (missing_id == -2) {
-        ESP_LOGW(TAG, "Received packet %u, but is was already parced",
-                 packet.GetId());
+        ESP_LOGD(TAG, "Received duplicate packet with id %u", packet.GetId());
         continue;  // We can ignore this packet
       } else if (missing_id >= 0) {
-        ESP_LOGE(TAG, "Missing packet %u", missing_id);
+        ESP_LOGW(TAG, "Missing packet %u, trying to request it", missing_id);
 
         // Request missing
-        AtemPacket p = AtemPacket(0x18, this->session_id_, 12);
+        AtemPacket p = AtemPacket(0x8, this->session_id_, 12);
         p.SetResendId(missing_id);
-        p.SetAckId(missing_id - 1);  // We received the previous packet
         this->SendPacket_(&p);
       }
     }
@@ -708,16 +706,15 @@ esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
 #if CONFIG_ATEM_STORE_SEND
   // Store packet in send_packets_
   if (xSemaphoreTake(this->send_mutex_, pdMS_TO_TICKS(10))) {
-    if (this->send_packets_.size() < 32) {
-      this->send_packets_.push_back(packet);
-      xSemaphoreGive(this->send_mutex_);
-      return ESP_OK;
+    if (this->send_packets_.size() >= 32) {
+      AtemPacket *p = this->send_packets_.back();
+      this->send_packets_.pop_back();
+      delete p;
     }
 
-    ESP_LOGW(TAG, "Failed to store packet (QUEUE FULL)");
-    delete packet;
+    this->send_packets_.push_back(packet);
     xSemaphoreGive(this->send_mutex_);
-    return ESP_ERR_NO_MEM;
+    return ESP_OK;
   }
 
   ESP_LOGW(TAG, "Failed to store packet (MUTEX FAIL)");
