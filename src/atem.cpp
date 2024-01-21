@@ -21,7 +21,7 @@ Atem::Atem(const char *address) {
 
   if ((rv = getaddrinfo(address, "9910", &hints, &servinfo)) != 0) {
     ESP_LOGE(TAG, "Failed to get address info");
-    abort();
+    return;
   }
 
   for (p = servinfo; p != NULL; p = p->ai_next) {
@@ -39,7 +39,7 @@ Atem::Atem(const char *address) {
 
   if (p == NULL) {
     ESP_LOGE(TAG, "Failed to connect to ATEM");
-    abort();
+    return;
   }
 
   freeaddrinfo(servinfo);
@@ -68,14 +68,16 @@ Atem::Atem(const char *address) {
                             5 * 1024, this, configMAX_PRIORITIES,
                             &this->task_handle_))) {
     ESP_LOGE(TAG, "Failed to create task");
-    abort();
+    return;
   }
 
   this->Reconnect_();
 }
 
 Atem::~Atem() {
-  vTaskDelete(this->task_handle_);
+  if (this->task_handle_ != nullptr) {
+    vTaskDelete(this->task_handle_);
+  }
 
   // Clear cached packages
 #if CONFIG_ATEM_STORE_SEND

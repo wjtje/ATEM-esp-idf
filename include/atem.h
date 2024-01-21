@@ -302,7 +302,7 @@ class Atem {
   types::MediaPlayerSource* mps_{nullptr};  // Media player source [mpl]
   std::map<uint16_t, char*> mpf_;           // Media player file name
 
-  TaskHandle_t task_handle_;
+  TaskHandle_t task_handle_{nullptr};
   void task_();
 
   /**
