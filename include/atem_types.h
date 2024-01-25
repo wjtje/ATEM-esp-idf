@@ -110,8 +110,11 @@ enum Source : uint16_t {
 };
 
 struct InputProperty {
-  char name_long[21];
-  char name_short[5];
+  /// @warning This string is not NULL terminated
+  char name_long[20];
+
+  /// @warning This string is not NULL terminated
+  char name_short[4];
 };
 
 struct TransitionState {

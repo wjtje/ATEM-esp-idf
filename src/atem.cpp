@@ -461,7 +461,8 @@ void Atem::task_() {
           // Copy name short
           len =
               strnlen(command.GetData<char *>() + 22, sizeof(inpr.name_short));
-          memcpy(inpr.name_short, command.GetData<uint8_t *>() + 22, len);
+          memcpy(inpr.name_short, command.GetData<uint8_t *>() + 22,
+                 sizeof(inpr.name_short));
 
           // Store inpr
           this->input_properties_[source] = inpr;
