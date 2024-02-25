@@ -191,6 +191,13 @@ class DskTie : public AtemCommand {
   }
 };
 
+class FadeToBlack : public AtemCommand {
+ public:
+  FadeToBlack(uint8_t me) : AtemCommand("FtbA", 12) {
+    GetData<uint8_t *>()[0] = me;
+  }
+};
+
 class MediaPlayerSource : public AtemCommand {
  public:
   MediaPlayerSource(uint8_t mediaplayer, uint8_t mask, uint8_t type,

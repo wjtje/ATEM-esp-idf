@@ -190,6 +190,11 @@ struct DskState {
   Source key;
 };
 
+struct FadeToBlack {
+  bool fully_black;
+  bool in_transition;
+};
+
 struct MixEffectState {
   Source program;
   Source preview;
@@ -197,6 +202,7 @@ struct MixEffectState {
   TransitionState transition;
   uint8_t num_keyers;
   UskState *keyer;
+  FadeToBlack ftb;
 };
 
 }  // namespace types

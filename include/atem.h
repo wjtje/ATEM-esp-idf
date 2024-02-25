@@ -42,6 +42,10 @@ enum : int32_t {
    */
   ATEM_EVENT_DSK,
   /**
+   * @brief FtbS
+   */
+  ATEM_EVENT_FADE_TO_BLACK,
+  /**
    * @brief InPr
    */
   ATEM_EVENT_INPUT_PROPERTIES,
@@ -128,6 +132,15 @@ class Atem {
    * @return Weather or not the variable is valid
    */
   bool GetDskState(types::DskState* state, uint8_t keyer = 0);
+  /**
+   * @brief Get the state of the Fade to black on a specific MixEffect.
+   *
+   * @param state A variable that the state will be stored in
+   * @param me Which MixEffect to use
+   *
+   * @return Weather or not the variable is valid
+   */
+  bool GetFtbState(types::FadeToBlack* state, uint8_t me = 0);
   /**
    * @brief Get the map of input properties
    *

@@ -34,6 +34,15 @@ bool Atem::GetDskState(types::DskState* state, uint8_t keyer) {
   return false;
 }
 
+bool Atem::GetFtbState(types::FadeToBlack* state, uint8_t me) {
+  ATEM_MUTEX_OWER_CHECK("GetFtbState");
+  if (this->me_ != nullptr && this->top_.me > me) {
+    *state = this->me_[me].ftb;
+    return true;
+  }
+  return false;
+}
+
 bool Atem::GetMediaPlayer(types::MediaPlayer* state) {
   ATEM_MUTEX_OWER_CHECK("GetMediaPlayer");
   *state = this->mpl_;

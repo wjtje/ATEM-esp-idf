@@ -447,6 +447,16 @@ void Atem::task_() {
               command.GetData<uint8_t *>()[3];
           break;
         }
+        case ATEM_CMD("FtbS"): {  // Fade to black State
+          event |= 1 << ATEM_EVENT_FADE_TO_BLACK;
+          me = command.GetData<uint8_t *>()[0];
+          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
+          this->me_[me].ftb = {
+              .fully_black = bool(command.GetData<uint8_t *>()[1]),
+              .in_transition = bool(command.GetData<uint8_t *>()[2]),
+          };
+          break;
+        }
         case ATEM_CMD("InPr"): {  // Input Property
           event |= 1 << ATEM_EVENT_INPUT_PROPERTIES;
           source = command.GetDataS<types::Source>(0);
