@@ -108,12 +108,12 @@ class Atem {
    * @brief Get the source that's currently displayed of the aux channel. It
    * will return false when it's invalid.
    *
-   * @param source A variable that the source will be stored in
-   * @param channel Which aux channel to use, default to 0
+   * @param source[out] A variable that the source will be stored in
+   * @param channel[in] Which aux channel to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetAuxOutput(types::Source* source, uint8_t channel = 0);
+  bool GetAuxOutput(types::Source* source, uint8_t channel);
   /**
    * @brief Get all sources that are currently displayed on a aux channel
    *
@@ -126,21 +126,21 @@ class Atem {
   /**
    * @brief Get the state of a DSK
    *
-   * @param state A variable that the state will be stored in
-   * @param keyer Which keyer to use
+   * @param state[out] A variable that the state will be stored in
+   * @param keyer[in] Which keyer to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskState(types::DskState* state, uint8_t keyer = 0);
+  bool GetDskState(types::DskState* state, uint8_t keyer);
   /**
    * @brief Get the state of the Fade to black on a specific MixEffect.
    *
-   * @param state A variable that the state will be stored in
-   * @param me Which MixEffect to use
+   * @param state[out] A variable that the state will be stored in
+   * @param me[in] Which MixEffect to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetFtbState(types::FadeToBlack* state, uint8_t me = 0);
+  bool GetFtbState(types::FadeToBlack* state, uint8_t me);
   /**
    * @brief Get the map of input properties
    *
@@ -164,7 +164,7 @@ class Atem {
    * @brief Get information about how many stills and clip the media player can
    * hold
    *
-   * @param player A variable that will store the result
+   * @param player[out] A variable that will store the result
    *
    * @return Weather or not the variable is valid
    */
@@ -172,8 +172,8 @@ class Atem {
   /**
    * @brief Get the access to the active source on a specific mediaplayer
    *
-   * @param state A variable that will hold the current state
-   * @param mediaplayer
+   * @param state[out] A variable that will hold the current state
+   * @param mediaplayer[in] The media player to get the state from
    *
    * @return Weather or not the variable is valid
    */
@@ -190,12 +190,12 @@ class Atem {
   /**
    * @brief Get the current preview source active on ME
    *
-   * @param source A variable that the source will be stored in
-   * @param me Which ME to use, defaults to 0
+   * @param source[out] A variable that the source will be stored in
+   * @param me[in] Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetPreviewInput(types::Source* source, uint8_t me = 0);
+  bool GetPreviewInput(types::Source* source, uint8_t me);
   /**
    * @brief Get the Product Id (model) of the connected atem.
    *
@@ -205,16 +205,16 @@ class Atem {
   /**
    * @brief Get the current program source active on ME
    *
-   * @param source A variable that the source will be stored in
-   * @param me Which ME to use, defaults to 0
+   * @param source[out] A variable that the source will be stored in
+   * @param me[in] Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProgramInput(types::Source* source, uint8_t me = 0);
+  bool GetProgramInput(types::Source* source, uint8_t me);
   /**
    * @brief Get the Protocol Version
    *
-   * @param version A variable that will store the protocol version
+   * @param version[out] A variable that will store the protocol version
    *
    * @return Weather or not the variable is valid
    */
@@ -222,7 +222,7 @@ class Atem {
   /**
    * @brief Get the topology of the connected ATEM
    *
-   * @param topology A variable that will store the topology
+   * @param topology[out] A variable that will store the topology
    *
    * @return Weather or not the variable is valid
    */
@@ -230,41 +230,41 @@ class Atem {
   /**
    * @brief Get the information about the current transition on a ME
    *
-   * @param state A variable that will store the current state
-   * @param me Which ME to use, defaults to 0
+   * @param state[out] A variable that will store the current state
+   * @param me[in] Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionState(types::TransitionState* state, uint8_t me = 0);
+  bool GetTransitionState(types::TransitionState* state, uint8_t me);
   /**
    * @brief Get the Usk Properties object
    *
-   * @param state A variable that will store the current state
-   * @param keyer Which keyer to use, default to 0
-   * @param me Which ME to use, default to 0
+   * @param state[out] A variable that will store the current state
+   * @param me[in] Which MixEffect to use
+   * @param keyer[in] Which keyer to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskState(types::UskState* state, uint8_t keyer = 0, uint8_t me = 0);
+  bool GetUskState(types::UskState* state, uint8_t me, uint8_t keyer);
   /**
    * @brief Get the number of Usk on a given ME
    *
-   * @param number A variable that will store the result
-   * @param me Which ME to use, default to 0
+   * @param number[out] A variable that will store the result
+   * @param me[in] Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskNumber(uint8_t* number, uint8_t me = 0);
+  bool GetUskNumber(uint8_t* number, uint8_t me);
   /**
    * @brief Get the Usk Dve Properties object
    *
-   * @param state A variable that will store the current state
-   * @param keyer Which keyer to use, default to 0
-   * @param me Which ME to use, default to 0
+   * @param state[out] A variable that will store the current state
+   * @param me[in] Which MixEffect to use
+   * @param keyer[in] Which keyer to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskOnAir(bool* state, uint8_t keyer = 0, uint8_t me = 0);
+  bool GetUskOnAir(bool* state, uint8_t me, uint8_t keyer);
 
   /**
    * @brief Send a list of commands to the ATEM, memory is automaticaly
@@ -276,7 +276,7 @@ class Atem {
    *  });
    * @endcode
    *
-   * @param commands
+   * @param commands[in]
    *
    * @return If the packet was send (added to queue) successfully
    */
