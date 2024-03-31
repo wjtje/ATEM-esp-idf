@@ -1,0 +1,8 @@
+version: "0.1.0"
+description: "ATEM-esp-idf is library to communicate with ATEM video switchers"
+url: https://github.com/wjtje/ATEM-esp-idf
+repository: https://github.com/wjtje/ATEM-esp-idf
+license: MIT
+dependencies:
+  idf:
+    version: ">=4.1.0"

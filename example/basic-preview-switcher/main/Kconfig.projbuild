@@ -1,0 +1,12 @@
+menu "ATEM-esp-idf example"
+
+  config WIFI_SSID
+    string "The ssid of the AP to connect to"
+  
+  config WIFI_PSK
+    string "The PSK of the AP to connect to"
+  
+  config ATEM_IP
+    string "The IP address of the ATEM to connect to"
+
+endmenu

@@ -15,9 +15,7 @@ This list contains other notable projects that where used during the making of t
 
 ## How can I use this?
 
-Well, this code is designed for an ESP32 with ESP-idf. You can use this code as a starting point for your code, but when you need to reference this code and all other used resources.
-
-There is a `linux-port` branch on this repo, its a modified version of this code that can be compiled and run on _any_ linux device.
+This code is designed for an ESP32 with an LAN8720 chip, but it should work on just a normal ESP32. There is a `linux-port` branch on this repo, its a modified version of this code that can be compiled and run on _any_ linux device.
 
 You can use doxygen to generate documentation, just run `doxygen Doxyfile`.
 
