@@ -65,7 +65,7 @@ Atem::Atem(const char *address) {
 
   // Create background task
   if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem",
-                            5 * 1024, this, configMAX_PRIORITIES,
+                            5 * 1024, this, configMAX_PRIORITIES - 1,
                             &this->task_handle_))) {
     ESP_LOGE(TAG, "Failed to create task");
     return;
