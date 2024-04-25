@@ -159,7 +159,7 @@ class Atem {
    *
    * @return SemaphoreHandle_t
    */
-  SemaphoreHandle_t GetStateMutex() { return this->state_mutex_; }
+  SemaphoreHandle_t GetStateMutex() const { return this->state_mutex_; }
   /**
    * @brief Get information about how many stills and clip the media player can
    * hold
@@ -199,9 +199,9 @@ class Atem {
   /**
    * @brief Get the Product Id (model) of the connected atem.
    *
-   * @return char*
+   * @return const char*
    */
-  char* GetProductId() { return this->pid_; }
+  const char* GetProductId() const { return this->pid_; }
   /**
    * @brief Get the current program source active on ME
    *

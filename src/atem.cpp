@@ -654,7 +654,7 @@ esp_err_t Atem::SendPacket_(AtemPacket *packet) {
 
 void Atem::Reconnect_() {
   if (this->state_ != ConnectionState::CONNECTED)
-    ESP_LOGW(TAG, "Reconnecting to ATEM");
+    ESP_LOGI(TAG, "Reconnecting to ATEM");
 
   // Reset local variables
   this->state_ = ConnectionState::CONNECTED;
