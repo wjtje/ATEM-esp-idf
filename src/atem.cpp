@@ -122,8 +122,6 @@ void Atem::task_() {
   for (;;) {
     // Get length of next package
     len = recv(this->sockfd_, packet.GetData(), 2, MSG_PEEK);
-    if (packet.GetLength() > sizeof buffer)
-      ESP_LOGE(TAG, "Next package is buffer than buffer");
 
     // Something went wrong
     if (len < 0) {
@@ -151,7 +149,7 @@ void Atem::task_() {
 
     int recv_len = packet.GetLength();
     if (recv_len > sizeof buffer) {
-      ESP_LOGE(TAG, "Next package is buffer than buffer");
+      ESP_LOGE(TAG, "Next package is larger than the buffer");
       recv_len = sizeof buffer;
     }
 
