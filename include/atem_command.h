@@ -145,6 +145,11 @@ class AuxInput : public AtemCommand {
   }
 };
 
+class CaptureStill : public AtemCommand {
+ public:
+  CaptureStill() : AtemCommand("Capt", 8) {}
+};
+
 class Cut : public AtemCommand {
  public:
   /**
