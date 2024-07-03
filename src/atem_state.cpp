@@ -43,6 +43,12 @@ bool Atem::GetFtbState(types::FadeToBlack* state, uint8_t me) {
   return false;
 }
 
+bool Atem::GetStreamState(types::StreamState* state) {
+  ATEM_MUTEX_OWER_CHECK();
+  *state = this->stream_;
+  return true;
+}
+
 bool Atem::GetMediaPlayer(types::MediaPlayer* state) {
   ATEM_MUTEX_OWER_CHECK();
   *state = this->mpl_;

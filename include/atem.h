@@ -74,6 +74,10 @@ enum : int32_t {
    */
   ATEM_EVENT_SOURCE,
   /**
+   * @brief StRS
+   */
+  ATEM_EVENT_STREAM,
+  /**
    * @brief _top
    */
   ATEM_EVENT_TOPOLOGY,
@@ -160,6 +164,13 @@ class Atem {
    * @return SemaphoreHandle_t
    */
   SemaphoreHandle_t GetStateMutex() const { return this->state_mutex_; }
+  /**
+   * @brief Get information about the current stream state.
+   *
+   * @param state[out] A variable that will store the result
+   * @return Weather or not the variable is valid
+   */
+  bool GetStreamState(types::StreamState* state);
   /**
    * @brief Get information about how many stills and clip the media player can
    * hold
@@ -314,6 +325,7 @@ class Atem {
   types::Source* aux_out_{nullptr};         // Source in aux [aux]
   types::MediaPlayerSource* mps_{nullptr};  // Media player source [mpl]
   std::map<uint16_t, char*> mpf_;           // Media player file name
+  types::StreamState stream_{types::StreamState::IDLE};  // Stream state
 
   TaskHandle_t task_handle_{nullptr};
   void task_();

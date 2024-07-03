@@ -434,6 +434,18 @@ class SaveStartupState : public AtemCommand {
   SaveStartupState() : AtemCommand("SRsv", 12) { GetData<uint32_t *>()[0] = 0; }
 };
 
+class Stream : public AtemCommand {
+ public:
+  /**
+   * @brief Start or stop streaming.
+   *
+   * @param state[in] The new state
+   */
+  Stream(bool state) : AtemCommand("StrR", 12) {
+    GetData<uint8_t *>()[0] = state;
+  }
+};
+
 class TransitionPosition : public AtemCommand {
  public:
   /**

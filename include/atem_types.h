@@ -209,5 +209,7 @@ struct MixEffectState {
   FadeToBlack ftb;
 };
 
+enum class StreamState { IDLE = 1, STARTING = 2, STREAMING = 4 };
+
 }  // namespace types
 }  // namespace atem

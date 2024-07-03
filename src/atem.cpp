@@ -596,6 +596,12 @@ void Atem::task_() {
           this->me_[me].preview = command.GetDataS<types::Source>(1);
           break;
         }
+        case ATEM_CMD("StRS"): {  // Stream Status
+          if (command.GetLength() != 12) continue;
+          event |= 1 << ATEM_EVENT_STREAM;
+          this->stream_ = (types::StreamState)(command.GetData<uint8_t *>()[1]);
+          break;
+        }
         case ATEM_CMD("TrPs"): {  // Transition Position
           event |= 1 << ATEM_EVENT_TRANSITION_POSITION;
           me = command.GetData<uint8_t *>()[0];
