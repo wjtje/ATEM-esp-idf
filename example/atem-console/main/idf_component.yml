@@ -1,0 +1,4 @@
+dependencies:
+  wjtje/ATEM-esp-idf:
+    version: "^0.1.0"
+    override_path: "../../.."
