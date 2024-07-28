@@ -131,6 +131,11 @@ void Atem::task_() {
       }
 
       if (ack_count > 4) {  // Already send multiple ACK requests
+        if (ack_count != INT_MAX) {
+          ESP_LOGW(TAG, "The connection seems dead, reconnecting");
+          ack_count = INT_MAX;
+        }
+
         this->Reconnect_();
         continue;
       }
