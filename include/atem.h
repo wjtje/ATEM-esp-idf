@@ -1,9 +1,9 @@
 /**
  * @file atem.h
- * @author Wouter van der Wal (me@wjtje.dev)
+ * @author Wouter (atem_esp_idf@wjt.je)
  * @brief Provides the main class that used to communicate to an ATEM.
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal
+ * @copyright Copyright (c) 2023 - Wouter (wjtje)
  */
 #pragma once
 #include <arpa/inet.h>
@@ -21,6 +21,7 @@
 #include "atem_command.h"
 #include "atem_packet.h"
 #include "atem_types.h"
+#include "sequence_check.h"
 
 namespace atem {
 
@@ -117,16 +118,16 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetAuxOutput(types::Source* source, uint8_t channel);
+  bool GetAuxOutput(Source* source, uint8_t channel);
   /**
    * @brief Get all sources that are currently displayed on a aux channel
    *
    * @warning This can be null, length can be determented using GetTopology
    * @warning Make sure your task has ownership over the atem state
    *
-   * @return types::Source*
+   * @return Source*
    */
-  types::Source* GetAuxOutputs() { return this->aux_out_; }
+  const std::vector<Source>& GetAuxOutputs() { return this->aux_out_; }
   /**
    * @brief Get the state of a DSK
    *
@@ -135,7 +136,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskState(types::DskState* state, uint8_t keyer);
+  bool GetDskState(DskState* state, uint8_t keyer);
   /**
    * @brief Get the state of the Fade to black on a specific MixEffect.
    *
@@ -144,15 +145,15 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetFtbState(types::FadeToBlack* state, uint8_t me);
+  bool GetFtbState(FadeToBlack* state, uint8_t me);
   /**
    * @brief Get the map of input properties
    *
    * @warning Make sure your task has ownership over the atem state
    *
-   * @return std::map<types::Source, types::InputProperty>*
+   * @return const std::map<Source, InputProperty> &
    */
-  const std::map<types::Source, types::InputProperty> GetInputProperties() {
+  const std::map<Source, InputProperty>& GetInputProperties() {
     return this->input_properties_;
   }
   /**
@@ -170,7 +171,7 @@ class Atem {
    * @param state[out] A variable that will store the result
    * @return Weather or not the variable is valid
    */
-  bool GetStreamState(types::StreamState* state);
+  bool GetStreamState(StreamState* state);
   /**
    * @brief Get information about how many stills and clip the media player can
    * hold
@@ -179,7 +180,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayer(types::MediaPlayer* state);
+  bool GetMediaPlayer(MediaPlayer* state);
   /**
    * @brief Get the access to the active source on a specific mediaplayer
    *
@@ -188,16 +189,17 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayerSource(types::MediaPlayerSource* state,
-                            uint8_t mediaplayer);
+  bool GetMediaPlayerSource(MediaPlayerSource* state, uint8_t mediaplayer);
   /**
    * @brief Get the map of the Media Player File Names
    *
    * @warning Make sure your task has ownership over the atem state
    *
-   * @return std::map<uint16_t, char*> {index, file name}
+   * @return const std::map<uint16_t, char*> {index, file name}
    */
-  std::map<uint16_t, char*> GetMediaPlayerFileName() { return this->mpf_; }
+  const std::map<uint16_t, char*>& GetMediaPlayerFileName() {
+    return this->mpf_;
+  }
   /**
    * @brief Get the current preview source active on ME
    *
@@ -206,7 +208,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetPreviewInput(types::Source* source, uint8_t me);
+  bool GetPreviewInput(Source* source, uint8_t me);
   /**
    * @brief Get the Product Id (model) of the connected atem.
    *
@@ -221,7 +223,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProgramInput(types::Source* source, uint8_t me);
+  bool GetProgramInput(Source* source, uint8_t me);
   /**
    * @brief Get the Protocol Version
    *
@@ -229,7 +231,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProtocolVersion(types::ProtocolVersion* version);
+  bool GetProtocolVersion(ProtocolVersion* version);
   /**
    * @brief Get the topology of the connected ATEM
    *
@@ -237,7 +239,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTopology(types::Topology* topology);
+  bool GetTopology(Topology* topology);
   /**
    * @brief Get the information about the current transition on a ME
    *
@@ -246,7 +248,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionState(types::TransitionState* state, uint8_t me);
+  bool GetTransitionState(TransitionState* state, uint8_t me);
   /**
    * @brief Get the Usk Properties object
    *
@@ -256,7 +258,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskState(types::UskState* state, uint8_t me, uint8_t keyer);
+  bool GetUskState(UskState* state, uint8_t me, uint8_t keyer);
   /**
    * @brief Get the number of Usk on a given ME
    *
@@ -304,8 +306,7 @@ class Atem {
   uint16_t remote_id_{0};
 
   // Check missing packets
-  int16_t offset_{1};
-  uint32_t received_{0xFFFFFFFE};
+  SequenceCheck received_;
 
 // Packets send
 #if CONFIG_ATEM_STORE_SEND
@@ -315,17 +316,17 @@ class Atem {
 
   // ATEM state
   SemaphoreHandle_t state_mutex_{xSemaphoreCreateMutex()};
-  std::map<types::Source, types::InputProperty> input_properties_;
-  types::Topology top_;                     // Topology
-  types::ProtocolVersion ver_;              // Protocol version
-  types::MediaPlayer mpl_;                  // Media player
-  char pid_[45] = {0};                      // Product Id
-  types::MixEffectState* me_{nullptr};      // [me]
-  types::DskState* dsk_{nullptr};           // [keyer]
-  types::Source* aux_out_{nullptr};         // Source in aux [aux]
-  types::MediaPlayerSource* mps_{nullptr};  // Media player source [mpl]
-  std::map<uint16_t, char*> mpf_;           // Media player file name
-  types::StreamState stream_{types::StreamState::IDLE};  // Stream state
+  std::map<Source, InputProperty> input_properties_;
+  Topology top_;                           // Topology
+  ProtocolVersion ver_;                    // Protocol version
+  MediaPlayer mpl_;                        // Media player
+  char pid_[45] = {0};                     // Product Id
+  std::vector<MixEffectState> me_;         // [me]
+  std::vector<DskState> dsk_;              // [keyer]
+  std::vector<Source> aux_out_;            // Source in aux [aux]
+  std::vector<MediaPlayerSource> mps_;     // Media player source [mpl]
+  std::map<uint16_t, char*> mpf_;          // Media player file name
+  StreamState stream_{StreamState::IDLE};  // Stream state
 
   TaskHandle_t task_handle_{nullptr};
   void task_();
@@ -341,16 +342,6 @@ class Atem {
    * @brief Close current connection, Reset variables, and send INIT request.
    */
   void Reconnect_();
-  /**
-   * @brief Checks the order of the packet id's to make sure we are parcing them
-   * in order.
-   *
-   * @param id The id of the received packet
-   * @return >0 A packet with this id is missing
-   * @return -1 This is fine
-   * @return -2 Already parced
-   */
-  int16_t CheckOrder_(int16_t id);
 };
 
 }  // namespace atem

@@ -1,16 +1,16 @@
 /**
  * @file atem_types.h
- * @author Wouter van der Wal (me@wjtje.dev)
+ * @author Wouter (atem_esp_idf@wjt.je)
  * @brief Provides different types used by other parts of the protocol.
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal
+ * @copyright Copyright (c) 2023 - Wouter (wjtje)
  */
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
+#include <vector>
 
 namespace atem {
-namespace types {
 
 enum Source : uint16_t {
   BLACK,
@@ -204,12 +204,10 @@ struct MixEffectState {
   Source preview;
   uint16_t usk_on_air;
   TransitionState transition;
-  uint8_t num_keyers;
-  UskState *keyer;
+  std::vector<UskState> keyer;
   FadeToBlack ftb;
 };
 
 enum class StreamState { IDLE = 1, STARTING = 2, STREAMING = 4 };
 
-}  // namespace types
 }  // namespace atem

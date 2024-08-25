@@ -1,10 +1,10 @@
 /**
  * @file atem_packet.h
- * @author Wouter van der Wal (me@wjtje.dev)
+ * @author Wouter (atem_esp_idf@wjt.je)
  * @brief Contains function to parse a UDP packet create by an ATEM or create a
  * valid one.
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal
+ * @copyright Copyright (c) 2023 - Wouter (wjtje)
  */
 #pragma once
 #include <cstring>

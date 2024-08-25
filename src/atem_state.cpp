@@ -16,120 +16,110 @@ static const char* TAG{"AtemState"};
 
 namespace atem {
 
-bool Atem::GetAuxOutput(types::Source* source, uint8_t channel) {
+bool Atem::GetAuxOutput(Source* source, uint8_t channel) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->aux_out_ != nullptr && this->top_.aux > channel) {
-    *source = this->aux_out_[channel];
-    return true;
-  }
-  return false;
+  if (this->aux_out_.size() <= channel) return false;
+
+  *source = this->aux_out_[channel];
+  return true;
 }
 
-bool Atem::GetDskState(types::DskState* state, uint8_t keyer) {
+bool Atem::GetDskState(DskState* state, uint8_t keyer) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->dsk_ != nullptr && this->top_.dsk > keyer) {
-    *state = this->dsk_[keyer];
-    return true;
-  }
-  return false;
+  if (this->dsk_.size() <= keyer) return false;
+
+  *state = this->dsk_[keyer];
+  return true;
 }
 
-bool Atem::GetFtbState(types::FadeToBlack* state, uint8_t me) {
+bool Atem::GetFtbState(FadeToBlack* state, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->me_ != nullptr && this->top_.me > me) {
-    *state = this->me_[me].ftb;
-    return true;
-  }
-  return false;
+  if (this->me_.size() <= me) return false;
+
+  *state = this->me_[me].ftb;
+  return true;
 }
 
-bool Atem::GetStreamState(types::StreamState* state) {
+bool Atem::GetStreamState(StreamState* state) {
   ATEM_MUTEX_OWER_CHECK();
   *state = this->stream_;
   return true;
 }
 
-bool Atem::GetMediaPlayer(types::MediaPlayer* state) {
+bool Atem::GetMediaPlayer(MediaPlayer* state) {
   ATEM_MUTEX_OWER_CHECK();
   *state = this->mpl_;
   return true;
 }
 
-bool Atem::GetMediaPlayerSource(types::MediaPlayerSource* state,
-                                uint8_t mediaplayer) {
+bool Atem::GetMediaPlayerSource(MediaPlayerSource* state, uint8_t mediaplayer) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->mps_ != nullptr && this->top_.mediaplayers > mediaplayer) {
-    *state = this->mps_[mediaplayer];
-    return true;
-  }
-  return false;
+  if (this->mps_.size() <= mediaplayer) return false;
+
+  *state = this->mps_[mediaplayer];
+  return true;
 }
 
-bool Atem::GetPreviewInput(types::Source* source, uint8_t me) {
+bool Atem::GetPreviewInput(Source* source, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->me_ != nullptr && this->top_.me > me) {
-    *source = this->me_[me].preview;
-    return true;
-  }
-  return false;
+  if (this->me_.size() <= me) return false;
+
+  *source = this->me_[me].preview;
+  return true;
 }
 
-bool Atem::GetProgramInput(types::Source* source, uint8_t me) {
+bool Atem::GetProgramInput(Source* source, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->me_ != nullptr && this->top_.me > me) {
-    *source = this->me_[me].program;
-    return true;
-  }
-  return false;
+  if (this->me_.size() <= me) return false;
+
+  *source = this->me_[me].program;
+  return true;
 }
 
-bool Atem::GetProtocolVersion(types::ProtocolVersion* version) {
+bool Atem::GetProtocolVersion(ProtocolVersion* version) {
   ATEM_MUTEX_OWER_CHECK();
   *version = this->ver_;
   return true;
 }
 
-bool Atem::GetTopology(types::Topology* topology) {
+bool Atem::GetTopology(Topology* topology) {
   ATEM_MUTEX_OWER_CHECK();
   *topology = this->top_;
   return true;
 }
 
-bool Atem::GetTransitionState(types::TransitionState* state, uint8_t me) {
+bool Atem::GetTransitionState(TransitionState* state, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->me_ != nullptr && this->top_.me > me) {
-    *state = this->me_[me].transition;
-    return true;
-  }
-  return false;
+  if (this->me_.size() <= me) return false;
+
+  *state = this->me_[me].transition;
+  return true;
 }
 
-bool Atem::GetUskState(types::UskState* state, uint8_t me, uint8_t keyer) {
+bool Atem::GetUskState(UskState* state, uint8_t me, uint8_t keyer) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->me_ != nullptr && this->top_.me > me &&
-      this->me_[me].num_keyers > keyer) {
-    *state = *(this->me_[me].keyer + keyer);
-    return true;
-  }
+  if (this->me_.size() <= me) return false;
+  if (this->me_[me].keyer.size() <= keyer) return false;
+
+  *state = this->me_[me].keyer[keyer];
   return false;
 }
 
 bool Atem::GetUskNumber(uint8_t* number, uint8_t me) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->me_ != nullptr && this->top_.me > me) {
-    *number = this->me_[me].num_keyers;
-    return true;
-  }
-  return false;
+  if (this->me_.size() <= me) return false;
+
+  *number = this->me_[me].keyer.size();
+  return true;
 }
 
 bool Atem::GetUskOnAir(bool* state, uint8_t me, uint8_t keyer) {
   ATEM_MUTEX_OWER_CHECK();
-  if (this->me_ != nullptr && this->top_.me > me && 16 > keyer) {
-    *state = this->me_[me].usk_on_air & (0x1 << keyer);
-    return true;
-  }
-  return false;
+
+  if (this->me_.size() <= me || keyer > 15) return false;
+
+  *state = this->me_[me].usk_on_air & (0x1 << keyer);
+  return true;
 }
 
 }  // namespace atem

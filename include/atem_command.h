@@ -1,10 +1,10 @@
 /**
  * @file atem_command.h
- * @author Wouter van der Wal (me@wjtje.dev)
+ * @author Wouter (atem_esp_idf@wjt.je)
  * @brief Provides all the different command that can be send by or send to an
  * ATEM.
  *
- * @copyright Copyright (c) 2023 - Wouter van der Wal
+ * @copyright Copyright (c) 2023 - Wouter (wjtje)
  */
 #pragma once
 #include <lwip/inet.h>
@@ -47,7 +47,7 @@ class AtemCommand {
    *
    * @param version
    */
-  virtual void PrepairCommand(types::ProtocolVersion ver) {}
+  virtual void PrepairCommand(ProtocolVersion ver) {}
 
   /**
    * @brief Get the length of the command, this include the 8 bytes for the
@@ -138,7 +138,7 @@ class AuxInput : public AtemCommand {
    * @param source[in] The new source for the AUX channel
    * @param channel[in] Which AUX channel to change
    */
-  AuxInput(types::Source source, uint8_t channel) : AtemCommand("CAuS", 12) {
+  AuxInput(Source source, uint8_t channel) : AtemCommand("CAuS", 12) {
     GetData<uint8_t *>()[0] = 1;
     GetData<uint8_t *>()[1] = channel;
     GetData<uint16_t *>()[1] = htons(source);
@@ -168,7 +168,7 @@ class DskAuto : public AtemCommand {
    * @param keyer[in] Which keyer to perform the action on
    */
   DskAuto(uint8_t keyer) : AtemCommand("DDsA", 12), keyer_(keyer) {}
-  void PrepairCommand(types::ProtocolVersion ver) override {
+  void PrepairCommand(ProtocolVersion ver) override {
     if (ver.major <= 2 && ver.minor <= 27) {
       GetData<uint8_t *>()[0] = this->keyer_;
     } else {
@@ -202,7 +202,7 @@ class DskFill : public AtemCommand {
    * @param source[in] The new source
    * @param keyer[in] Which keyer to perform the action on
    */
-  DskFill(types::Source source, uint8_t keyer) : AtemCommand("CDsF", 12) {
+  DskFill(Source source, uint8_t keyer) : AtemCommand("CDsF", 12) {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
   }
@@ -216,7 +216,7 @@ class DskKey : public AtemCommand {
    * @param source[in] The new source
    * @param keyer[in] Which keyer to perform the action on
    */
-  DskKey(types::Source source, uint8_t keyer) : AtemCommand("CDsC", 12) {
+  DskKey(Source source, uint8_t keyer) : AtemCommand("CDsC", 12) {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
   }
@@ -281,9 +281,9 @@ class UskDveKeyFrameProperties : public AtemCommand {
    * @param me[in] Which MixEffect to perform this action on
    */
   UskDveKeyFrameProperties(
-      types::UskDveKeyFrame key_frame,
-      std::initializer_list<std::tuple<types::UskDveProperty, int>> p,
-      uint8_t keyer, uint8_t me)
+      UskDveKeyFrame key_frame,
+      std::initializer_list<std::tuple<UskDveProperty, int>> p, uint8_t keyer,
+      uint8_t me)
       : AtemCommand("CKFP", 64) {
     uint32_t mask = 0;
 
@@ -310,7 +310,7 @@ class UskDveRunFlyingKey : public AtemCommand {
    * @param keyer[in] Which Upstream Keyer to perform this action on
    * @param me[in] Which MixEffect to perform this action on
    */
-  UskDveRunFlyingKey(types::UskDveKeyFrame key_frame, uint8_t run_to_inf_i,
+  UskDveRunFlyingKey(UskDveKeyFrame key_frame, uint8_t run_to_inf_i,
                      uint8_t keyer, uint8_t me)
       : AtemCommand("RFlK", 16) {
     GetData<uint8_t *>()[0] = 0;
@@ -330,9 +330,8 @@ class UskDveProperties : public AtemCommand {
    * @param keyer[in] Which Upstream Keyer to perform this action on
    * @param me[in] Which MixEffect to perform this action on
    */
-  UskDveProperties(
-      std::initializer_list<std::tuple<types::UskDveProperty, int>> p,
-      uint8_t keyer, uint8_t me)
+  UskDveProperties(std::initializer_list<std::tuple<UskDveProperty, int>> p,
+                   uint8_t keyer, uint8_t me)
       : AtemCommand("CKDV", 72) {
     uint32_t mask = 0;
 
@@ -357,8 +356,7 @@ class UskFill : public AtemCommand {
    * @param keyer[in] Which Upstream Keyer to perform this action on
    * @param me[in] Which MixEffect to perform this action on
    */
-  UskFill(types::Source source, uint8_t keyer, uint8_t me)
-      : AtemCommand("CKeF", 12) {
+  UskFill(Source source, uint8_t keyer, uint8_t me) : AtemCommand("CKeF", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint8_t *>()[1] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
@@ -406,7 +404,7 @@ class PreviewInput : public AtemCommand {
    * @param source[in] The new preview source
    * @param me[in] Which MixEffect to perform this action on
    */
-  PreviewInput(types::Source source, uint8_t me) : AtemCommand("CPvI", 12) {
+  PreviewInput(Source source, uint8_t me) : AtemCommand("CPvI", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(source);
   }
@@ -420,7 +418,7 @@ class ProgramInput : public AtemCommand {
    * @param source[in] The new program source
    * @param me[in] Which MixEffect to perform this action on
    */
-  ProgramInput(types::Source source, uint8_t me) : AtemCommand("CPgI", 12) {
+  ProgramInput(Source source, uint8_t me) : AtemCommand("CPgI", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(source);
   }

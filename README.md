@@ -25,4 +25,4 @@ You can use doxygen to generate documentation, just run `doxygen Doxyfile`.
 
 ## License
 
-The MIT License (MIT) - Copyright (c) 2023 Wouter van der Wal
+The MIT License (MIT) - Copyright (c) 2023 Wouter (wjtje)

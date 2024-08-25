@@ -62,7 +62,7 @@ extern "C" void app_main(void) {
   atem::Atem* _atem = new atem::Atem(CONFIG_ATEM_IP);
 
   // Switch between sources ME 1
-  atem::types::Source preview_source;
+  atem::Source preview_source;
   for (;;) {
     if (!_atem->Connected()) goto wait;
     if (xSemaphoreTake(_atem->GetStateMutex(), pdMS_TO_TICKS(250)) != pdTRUE)
@@ -75,9 +75,9 @@ extern "C" void app_main(void) {
     }
 
     // Check if the next source is valid for this ATEM
-    preview_source = atem::types::Source(int(preview_source) + 1);
+    preview_source = atem::Source(int(preview_source) + 1);
     if (!_atem->GetInputProperties().contains(preview_source)) {
-      preview_source = atem::types::Source::BLACK;
+      preview_source = atem::Source::BLACK;
     }
 
     // Change the preview input

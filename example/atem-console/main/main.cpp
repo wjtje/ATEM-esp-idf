@@ -24,7 +24,7 @@ static void atem_handler(void* arg, esp_event_base_t event_base,
   // You can compare the event_id to ATEM_EVENT_* to see what data has been
   // changed
   if (xSemaphoreTake(_atem->GetStateMutex(), pdMS_TO_TICKS(100))) {
-    atem::types::Source preview;
+    atem::Source preview;
     if (_atem->GetPreviewInput(&preview, 0)) {
       // If GetPreviewInput returns true, that means the preview variable now
       // has the preview source
@@ -74,12 +74,11 @@ static int atem_preview() {
     // Set preview source
     _atem->SendCommands({
         new atem::cmd::PreviewInput(
-            (atem::types::Source)(*atem_preview_args.source->ival),
-            (uint8_t)me),
+            (atem::Source)(*atem_preview_args.source->ival), (uint8_t)me),
     });
   } else {
     // Get preview source
-    atem::types::Source source;
+    atem::Source source;
 
     if (xSemaphoreTake(_atem->GetStateMutex(), pdMS_TO_TICKS(50))) {
       if (_atem->GetPreviewInput(&source, (uint8_t)me)) {

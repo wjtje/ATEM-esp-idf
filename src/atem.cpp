@@ -5,6 +5,8 @@ namespace atem {
 static const char *TAG{"Atem"};
 ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
 
+// MARK: Constructor and deconstructor
+
 Atem::Atem(const char *address) {
   // Clear variables
   memset(&this->top_, 0, sizeof(this->top_));
@@ -89,29 +91,12 @@ Atem::~Atem() {
 
   // Clear memory
   xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
-  this->input_properties_.clear();
-  // Clear ME (and the keyer state)
-  if (this->me_ != nullptr) {
-    for (int i = 0; i < this->top_.me; i++) {
-      if (this->me_[i].keyer != nullptr) free(this->me_[i].keyer);
-    }
-    free(this->me_);
-    this->me_ = nullptr;
-  }
-  if (this->dsk_ != nullptr) {
-    free(this->dsk_);
-    this->dsk_ = nullptr;
-  }
-  delete this->aux_out_;
-  delete this->mps_;
-  if (this->mps_ != nullptr) {
-    free(this->mps_);
-    this->mps_ = nullptr;
-  }
   for (std::pair<uint16_t, char *> file : this->mpf_) free(file.second);
   this->mpf_.clear();
   xSemaphoreGive(this->state_mutex_);
 }
+
+// MARK: Background task
 
 void Atem::task_() {
   char buffer[CONFIG_PACKET_BUFFER_SIZE];
@@ -153,9 +138,11 @@ void Atem::task_() {
     }
 
     int recv_len = packet.GetLength();
-    if (recv_len > sizeof buffer) {
-      ESP_LOGE(TAG, "Next package is larger than the buffer");
-      recv_len = sizeof buffer;
+    if (recv_len > sizeof(buffer)) {
+      ESP_LOGE(TAG,
+               "Next package (len: %i) is larger than the buffer (len: %u)",
+               recv_len, sizeof(buffer));
+      recv_len = sizeof(buffer);
     }
 
     // Get next packet
@@ -262,12 +249,14 @@ void Atem::task_() {
         this->SendPacket_(&p);
       }
 
-      // Check if we are receiving it in order
-      int16_t missing_id = this->CheckOrder_(packet.GetId());
-      if (missing_id == -2) {
+      if (!this->received_.Add(packet.GetId())) {
         ESP_LOGD(TAG, "Received duplicate packet with id %u", packet.GetId());
         continue;  // We can ignore this packet
-      } else if (missing_id >= 0) {
+      }
+
+      // Check if we are receiving it in order
+      int16_t missing_id = this->received_.GetMissing();
+      if (missing_id >= 0) {
         ESP_LOGW(TAG, "Missing packet %u, trying to request it", missing_id);
 
         // Request missing
@@ -322,8 +311,7 @@ void Atem::task_() {
     uint8_t me, keyer, channel, state, mediaplayer;
     uint16_t pos;
     size_t len;
-    types::Source source;
-    types::UskState *usk_state;
+    Source source;
 
     // Lock access to the state
     if (!xSemaphoreTake(this->state_mutex_, 150 / portTICK_PERIOD_MS)) {
@@ -334,7 +322,10 @@ void Atem::task_() {
     }
 
     for (int i = 0; AtemCommand command : packet) {
-      if (++i > 512) break;  // Limit 512 command in a single packet
+      if (++i > 512) {  // Limit 512 command in a single packet
+        ESP_LOGE(TAG, "To many commands in one package");
+        break;
+      }
 
       switch (ATEM_CMD(((char *)command.GetCmd()))) {
         case ATEM_CMD("_mpl"): {  // Media Player
@@ -348,11 +339,9 @@ void Atem::task_() {
           uint8_t me = command.GetData(0);
           uint8_t num_keyer = command.GetData(1);
 
-          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
+          if (this->me_.size() <= me) break;
 
-          this->me_[me].num_keyers = num_keyer;
-          this->me_[me].keyer =
-              (types::UskState *)calloc(num_keyer, sizeof(types::UskState));
+          this->me_[me].keyer.resize(num_keyer);
           break;
         }
         case ATEM_CMD("_ver"): {  // Protocol version
@@ -373,14 +362,6 @@ void Atem::task_() {
         case ATEM_CMD("_top"): {  // Topology
           event |= 1 << ATEM_EVENT_TOPOLOGY;
 
-          // Clear allocated memeory
-          if (this->me_ != nullptr) {
-            for (int i = 0; i < this->top_.me; i++) {
-              if (this->me_[i].keyer != nullptr) free(this->me_[i].keyer);
-            }
-            free(this->me_);
-          }
-
           this->top_.me = command.GetData(0);
           this->top_.sources = command.GetData(1);
           this->top_.dsk = command.GetData(2);
@@ -396,45 +377,37 @@ void Atem::task_() {
           this->top_.talkback_channels = command.GetData(13);
           this->top_.camera_control = command.GetData(18);
 
-          // Clear memory
-          if (this->dsk_ != nullptr) free(this->dsk_);
-          delete this->aux_out_;
-          if (this->mps_ != nullptr) free(this->mps_);
-
-          // Allocate buffers
-          this->me_ = (atem::types::MixEffectState *)calloc(
-              this->top_.me, sizeof(types::MixEffectState));
-          this->dsk_ = (types::DskState *)calloc(this->top_.dsk,
-                                                 sizeof(types::DskState));
-          this->aux_out_ = new types::Source[this->top_.aux];
-          this->mps_ = (types::MediaPlayerSource *)calloc(
-              this->top_.mediaplayers, sizeof(types::MediaPlayerSource));
+          // Resize buffers
+          this->me_.resize(this->top_.me);
+          this->dsk_.resize(this->top_.dsk);
+          this->aux_out_.resize(this->top_.aux);
+          this->mps_.resize(this->top_.mediaplayers);
           break;
         }
         case ATEM_CMD("AuxS"): {  // AUX Select
           event |= 1 << ATEM_EVENT_AUX;
           channel = command.GetData<uint8_t *>()[0];
-          if (this->aux_out_ == nullptr || this->top_.aux - 1 < channel) break;
+          if (this->aux_out_.size() <= channel) break;
 
           this->aux_out_[channel] =
-              (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
+              (Source)ntohs(command.GetData<uint16_t *>()[1]);
           break;
         }
         case ATEM_CMD("DskB"): {  // DSK Source
           event |= 1 << ATEM_EVENT_DSK;
           keyer = command.GetData<uint8_t *>()[0];
-          if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) break;
+          if (this->dsk_.size() <= keyer) break;
 
           this->dsk_[keyer].fill =
-              (types::Source)ntohs(command.GetData<uint16_t *>()[1]);
+              (Source)ntohs(command.GetData<uint16_t *>()[1]);
           this->dsk_[keyer].key =
-              (types::Source)ntohs(command.GetData<uint16_t *>()[2]);
+              (Source)ntohs(command.GetData<uint16_t *>()[2]);
           break;
         }
         case ATEM_CMD("DskP"): {  // DSK Properties
           event |= 1 << ATEM_EVENT_DSK;
           keyer = command.GetData<uint8_t *>()[0];
-          if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) break;
+          if (this->dsk_.size() <= keyer) break;
 
           this->dsk_[keyer].tie = command.GetData<uint8_t *>()[1];
           break;
@@ -442,7 +415,7 @@ void Atem::task_() {
         case ATEM_CMD("DskS"): {  // DSK State
           event |= 1 << ATEM_EVENT_DSK;
           keyer = command.GetData<uint8_t *>()[0];
-          if (this->dsk_ == nullptr || this->top_.dsk - 1 < keyer) break;
+          if (this->dsk_.size() <= keyer) break;
 
           this->dsk_[keyer].on_air = command.GetData<uint8_t *>()[1];
           this->dsk_[keyer].in_transition = command.GetData<uint8_t *>()[2];
@@ -453,7 +426,8 @@ void Atem::task_() {
         case ATEM_CMD("FtbS"): {  // Fade to black State
           event |= 1 << ATEM_EVENT_FADE_TO_BLACK;
           me = command.GetData<uint8_t *>()[0];
-          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
+
+          if (this->me_.size() <= me) break;
           this->me_[me].ftb = {
               .fully_black = bool(command.GetData<uint8_t *>()[1]),
               .in_transition = bool(command.GetData<uint8_t *>()[2]),
@@ -462,9 +436,9 @@ void Atem::task_() {
         }
         case ATEM_CMD("InPr"): {  // Input Property
           event |= 1 << ATEM_EVENT_INPUT_PROPERTIES;
-          source = command.GetDataS<types::Source>(0);
+          source = command.GetDataS<Source>(0);
 
-          types::InputProperty inpr;
+          InputProperty inpr;
           memset(&inpr, 0, sizeof(inpr));
 
           // Copy name long
@@ -488,20 +462,18 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->me_ == nullptr || this->top_.me - 1 < me ||
-              this->me_[me].num_keyers - 1 < keyer)
-            break;
+          if (this->me_.size() <= me) break;
+          if (this->me_[me].keyer.size() <= keyer) break;
 
-          usk_state = this->me_[me].keyer + keyer;
-          usk_state->type = command.GetData<uint8_t *>()[2];
-          usk_state->fill =
-              (types::Source)ntohs(command.GetData<uint16_t *>()[3]);
-          usk_state->key =
-              (types::Source)ntohs(command.GetData<uint16_t *>()[4]);
-          usk_state->top = ntohs(command.GetData<uint16_t *>()[6]);
-          usk_state->bottom = ntohs(command.GetData<uint16_t *>()[7]);
-          usk_state->left = ntohs(command.GetData<uint16_t *>()[8]);
-          usk_state->right = ntohs(command.GetData<uint16_t *>()[9]);
+          atem::UskState &state = this->me_[me].keyer[keyer];
+          state.type = command.GetData<uint8_t *>()[2];
+          state.fill = (Source)ntohs(command.GetData<uint16_t *>()[3]);
+          state.key = (Source)ntohs(command.GetData<uint16_t *>()[4]);
+          state.top = int16_t(ntohs(command.GetData<uint16_t *>()[6]));
+          state.bottom = int16_t(ntohs(command.GetData<uint16_t *>()[7]));
+          state.left = int16_t(ntohs(command.GetData<uint16_t *>()[8]));
+          state.right = int16_t(ntohs(command.GetData<uint16_t *>()[9]));
+
           break;
         }
         case ATEM_CMD("KeDV"): {  // Key properties DVE
@@ -510,17 +482,16 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->me_ == nullptr || this->top_.me - 1 < me ||
-              this->me_[me].num_keyers - 1 < keyer)
-            break;
+          if (this->me_.size() <= me) break;
+          if (this->me_[me].keyer.size() <= keyer) break;
 
-          (this->me_[me].keyer + keyer)->dve_ = {
-              .size_x = (int)ntohl(command.GetData<uint32_t *>()[1]),
-              .size_y = (int)ntohl(command.GetData<uint32_t *>()[2]),
-              .pos_x = (int)ntohl(command.GetData<uint32_t *>()[3]),
-              .pos_y = (int)ntohl(command.GetData<uint32_t *>()[4]),
-              .rotation = (int)ntohl(command.GetData<uint32_t *>()[5]),
-          };
+          atem::UskDveProperties &state = this->me_[me].keyer[keyer].dve_;
+
+          state.size_x = (int)ntohl(command.GetData<uint32_t *>()[1]);
+          state.size_y = (int)ntohl(command.GetData<uint32_t *>()[2]);
+          state.pos_x = (int)ntohl(command.GetData<uint32_t *>()[3]);
+          state.pos_y = (int)ntohl(command.GetData<uint32_t *>()[4]);
+          state.rotation = (int)ntohl(command.GetData<uint32_t *>()[5]);
           break;
         }
         case ATEM_CMD("KeFS"): {  // Key Fly State
@@ -529,11 +500,10 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->me_ == nullptr || this->top_.me - 1 < me ||
-              this->me_[me].num_keyers - 1 < keyer)
-            break;
+          if (this->me_.size() <= me) break;
+          if (this->me_[me].keyer.size() <= keyer) break;
 
-          (this->me_[me].keyer + keyer)->at_key_frame =
+          this->me_[me].keyer[keyer].at_key_frame =
               command.GetData<uint8_t *>()[6];
           break;
         }
@@ -543,8 +513,9 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[1];
           state = command.GetData<uint8_t *>()[2];
 
-          if (this->me_ == nullptr || this->top_.me - 1 < me || keyer > 15)
-            break;
+          // Check if we have allocated memory for this
+          if (this->me_.size() <= me) break;
+          if (keyer > 15) break;
 
           this->me_[me].usk_on_air &= ~(0x1 << keyer);
           this->me_[me].usk_on_air |= (state << keyer);
@@ -553,7 +524,7 @@ void Atem::task_() {
         case ATEM_CMD("MPCE"): {  // Media Player Source
           event |= 1 << ATEM_EVENT_MEDIA_PLAYER;
           mediaplayer = command.GetData<uint8_t *>()[0];
-          if (this->top_.mediaplayers - 1 < mediaplayer) break;
+          if (this->mps_.size() <= mediaplayer) break;
 
           this->mps_[mediaplayer] = {
               .type = command.GetData<uint8_t *>()[1],
@@ -590,21 +561,23 @@ void Atem::task_() {
         case ATEM_CMD("PrgI"): {  // Program Input
           event |= 1 << ATEM_EVENT_SOURCE;
           me = command.GetData<uint8_t *>()[0];
-          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
-          this->me_[me].program = command.GetDataS<types::Source>(1);
+
+          if (this->me_.size() <= me) break;
+          this->me_[me].program = command.GetDataS<Source>(1);
           break;
         }
         case ATEM_CMD("PrvI"): {  // Preview Input
           event |= 1 << ATEM_EVENT_SOURCE;
           me = command.GetData<uint8_t *>()[0];
-          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
-          this->me_[me].preview = command.GetDataS<types::Source>(1);
+
+          if (this->me_.size() <= me) break;
+          this->me_[me].preview = command.GetDataS<Source>(1);
           break;
         }
         case ATEM_CMD("StRS"): {  // Stream Status
           if (command.GetLength() != 12) continue;
           event |= 1 << ATEM_EVENT_STREAM;
-          this->stream_ = (types::StreamState)(command.GetData<uint8_t *>()[1]);
+          this->stream_ = (StreamState)(command.GetData<uint8_t *>()[1]);
           break;
         }
         case ATEM_CMD("TrPs"): {  // Transition Position
@@ -613,7 +586,7 @@ void Atem::task_() {
           state = command.GetData<uint8_t *>()[1];
           pos = ntohs(command.GetData<uint16_t *>()[2]);
 
-          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
+          if (this->me_.size() <= me) break;
           this->me_[me].transition.in_transition = (bool)(state & 0x01);
           this->me_[me].transition.position = pos;
           break;
@@ -622,7 +595,7 @@ void Atem::task_() {
           event |= 1 << ATEM_EVENT_TRANSITION_STATE;
           me = command.GetData<uint8_t *>()[0];
 
-          if (this->me_ == nullptr || this->top_.me - 1 < me) break;
+          if (this->me_.size() <= me) break;
           this->me_[me].transition.style = command.GetData<uint8_t *>()[1];
           this->me_[me].transition.next = command.GetData<uint8_t *>()[2];
           break;
@@ -644,48 +617,7 @@ void Atem::task_() {
   vTaskDelete(nullptr);
 }  // namespace atem
 
-esp_err_t Atem::SendPacket_(AtemPacket *packet) {
-  ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
-                         ESP_LOG_VERBOSE);
-
-  ESP_LOGD(TAG, "-> Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
-           packet->GetFlags(), packet->GetAckId(), packet->GetResendId(),
-           packet->GetId(), packet->GetLength());
-
-  int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
-  if (len != packet->GetLength()) {
-    if (this->state_ >= ConnectionState::INITIALIZING)
-      ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetId());
-    return ESP_FAIL;
-  }
-  return ESP_OK;
-}
-
-void Atem::Reconnect_() {
-  if (this->state_ != ConnectionState::CONNECTED)
-    ESP_LOGI(TAG, "Reconnecting to ATEM");
-
-  // Reset local variables
-  this->state_ = ConnectionState::CONNECTED;
-  this->local_id_ = 0;
-  this->remote_id_ = 0;
-  this->offset_ = 1;
-  this->received_ = 0xFFFFFFFE;
-  this->session_id_ = 0x0B06;
-
-  // Remove all packets
-#if CONFIG_ATEM_STORE_SEND
-  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
-  for (auto p : this->send_packets_) delete p;
-  this->send_packets_.clear();
-  xSemaphoreGive(this->send_mutex_);
-#endif
-
-  // Send init request
-  AtemPacket p = AtemPacket(0x2, this->session_id_, 20);
-  ((uint8_t *)p.GetData())[12] = 0x01;
-  this->SendPacket_(&p);
-}
+// MARK Public functions
 
 esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
   // Get the length of the commands
@@ -748,32 +680,48 @@ esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
 #endif
 }
 
-int16_t Atem::CheckOrder_(int16_t id) {
-  static uint16_t recv_len = sizeof(this->received_) * 8;
-  uint16_t offset = (id - this->offset_) & 0x7FFF;
-  // Max id that the ATEM can send is 0x7FFF
+// MARK: Private functions
 
-  // Make room
-  if (offset < recv_len) {
-    this->received_ <<= offset;
-    this->offset_ = id;
+esp_err_t Atem::SendPacket_(AtemPacket *packet) {
+  ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
+                         ESP_LOG_VERBOSE);
+
+  ESP_LOGD(TAG, "-> Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
+           packet->GetFlags(), packet->GetAckId(), packet->GetResendId(),
+           packet->GetId(), packet->GetLength());
+
+  int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
+  if (len != packet->GetLength()) {
+    if (this->state_ >= ConnectionState::INITIALIZING)
+      ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetId());
+    return ESP_FAIL;
   }
+  return ESP_OK;
+}
 
-  // Offset maybe move, recalculate
-  offset = abs(id - this->offset_);
+void Atem::Reconnect_() {
+  if (this->state_ != ConnectionState::CONNECTED)
+    ESP_LOGI(TAG, "Reconnecting to ATEM");
 
-  // Check if already parced
-  if (this->received_ & 1 << offset) return -2;
+  // Reset local variables
+  this->state_ = ConnectionState::CONNECTED;
+  this->local_id_ = 0;
+  this->remote_id_ = 0;
+  this->session_id_ = 0x0B06;
+  this->received_ = SequenceCheck();
 
-  // Add the id to the received list
-  this->received_ |= 1 << offset;
+  // Remove all packets
+#if CONFIG_ATEM_STORE_SEND
+  xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
+  for (auto p : this->send_packets_) delete p;
+  this->send_packets_.clear();
+  xSemaphoreGive(this->send_mutex_);
+#endif
 
-  // Check for missing id's
-  if (this->received_ != 0xFFFFFFFF)
-    for (int16_t i = recv_len - 1; i != 0; i--)
-      if (!(this->received_ & 1 << i)) return ((this->offset_ - i) & 0x7FFF);
-
-  return -1;
+  // Send init request
+  AtemPacket p = AtemPacket(0x2, this->session_id_, 20);
+  ((uint8_t *)p.GetData())[12] = 0x01;
+  this->SendPacket_(&p);
 }
 
 }  // namespace atem
