@@ -164,7 +164,7 @@ void Atem::task_() {
              packet.GetId(), packet.GetLength());
 
     // Check session id
-    if (this->state_ == ConnectionState::ACTIVE &&
+    if (this->state_ == ConnectionState::kActive &&
         packet.GetSessionId() != this->session_id_) {
       ESP_LOGW(TAG,
                "Received packet with invalid session (%02x instead of %02x)",
@@ -173,14 +173,14 @@ void Atem::task_() {
     }
 
     // INIT packet
-    if (packet.GetFlags() & 0x2 && this->state_ != ConnectionState::ACTIVE) {
+    if (packet.GetFlags() & 0x2 && this->state_ != ConnectionState::kActive) {
       ESP_LOGD(TAG, "Received INIT");
       uint8_t init_status = ((const uint8_t *)packet.GetData())[12];
 
       if (init_status == 0x2) {  // INIT accepted
         this->local_id_ = 0;
         this->remote_id_ = 0;
-        this->state_ = ConnectionState::INITIALIZING;
+        this->state_ = ConnectionState::kInitializing;
         AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
         this->SendPacket_(&p);
       } else if (init_status == 0x3) {  // No connection available
@@ -193,23 +193,24 @@ void Atem::task_() {
     }
 
     // INIT packets complete
-    if (this->state_ == ConnectionState::INITIALIZING &&
+    if (this->state_ == ConnectionState::kInitializing &&
         packet.GetFlags() & 0x1 && packet.GetLength() == 12) {
       ESP_LOGI(TAG, "Initialization done");
       this->session_id_ = packet.GetSessionId();
-      this->state_ = ConnectionState::ACTIVE;
+      this->state_ = ConnectionState::kActive;
 
       // Send event's
       uint16_t packet_id = 1;  // Init packet ID
-      for (int32_t i = 0; i < sizeof(boot_events) * 8; i++)
+      for (int32_t i = 0; i < sizeof(boot_events) * 8; i++) {
         if (boot_events & 1 << i) {
           ESP_ERROR_CHECK_WITHOUT_ABORT(
               esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0));
         }
+      }
     }
 
     // RESEND request
-    if (packet.GetFlags() & 0x8 && this->state_ == ConnectionState::ACTIVE) {
+    if (packet.GetFlags() & 0x8 && this->state_ == ConnectionState::kActive) {
       ESP_LOGW(TAG, "<- Resend request for %u", packet.GetResendId());
       bool send = false;
 
@@ -244,7 +245,7 @@ void Atem::task_() {
       this->remote_id_ = packet.GetId();
 
       // Respond to ACK
-      if (this->state_ == ConnectionState::ACTIVE) {
+      if (this->state_ == ConnectionState::kActive) {
         AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
         p.SetAckId(this->remote_id_);
         this->SendPacket_(&p);
@@ -269,7 +270,7 @@ void Atem::task_() {
 
 #if CONFIG_ATEM_STORE_SEND
     // Receive ACK
-    if (packet.GetFlags() & 0x10 && this->state_ == ConnectionState::ACTIVE) {
+    if (packet.GetFlags() & 0x10 && this->state_ == ConnectionState::kActive) {
       if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
         int16_t id = packet.GetAckId();
         int i = 0;
@@ -657,7 +658,7 @@ void Atem::task_() {
     xSemaphoreGive(this->state_mutex_);  // unlock the access
 
     // Send events
-    if (event != 0 && this->state_ == ConnectionState::ACTIVE) {
+    if (event != 0 && this->state_ == ConnectionState::kActive) {
       uint16_t packet_id = packet.GetId();
 
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
@@ -747,7 +748,7 @@ esp_err_t Atem::SendPacket_(AtemPacket *packet) {
 
   int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
   if (len != packet->GetLength()) {
-    if (this->state_ >= ConnectionState::INITIALIZING)
+    if (this->state_ >= ConnectionState::kInitializing)
       ESP_LOGW(TAG, "Failed to send packet: %u", packet->GetId());
     return ESP_FAIL;
   }
@@ -755,11 +756,11 @@ esp_err_t Atem::SendPacket_(AtemPacket *packet) {
 }
 
 void Atem::Reconnect_() {
-  if (this->state_ != ConnectionState::CONNECTED)
-    ESP_LOGI(TAG, "Reconnecting to ATEM");
+  const bool was_connected = this->product_id_[0] != '\0';
+  if (was_connected) ESP_LOGI(TAG, "Reconnecting to ATEM");
 
   // Reset local variables
-  this->state_ = ConnectionState::CONNECTED;
+  this->state_ = ConnectionState::kConnected;
   this->local_id_ = 0;
   this->remote_id_ = 0;
   this->session_id_ = 0x0B06;
@@ -792,6 +793,13 @@ void Atem::Reconnect_() {
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
 #endif
+
+  // Send event that Product ID has changed
+  if (was_connected) {
+    uint16_t packet_id = 0;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_post(
+        ATEM_EVENT, ATEM_EVENT_PRODUCT_ID, &packet_id, sizeof(packet_id), 0));
+  }
 
   // Send init request
   AtemPacket p = AtemPacket(0x2, this->session_id_, 20);

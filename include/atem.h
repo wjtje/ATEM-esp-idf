@@ -166,7 +166,7 @@ class Atem {
    * @return true The connection is active.
    * @return false The connection isn't active
    */
-  bool Connected() const { return this->state_ == ConnectionState::ACTIVE; }
+  bool Connected() const { return this->state_ == ConnectionState::kActive; }
   /**
    * @brief Get the source that's currently displayed of the aux channel. It
    * will return false when it's invalid.
@@ -358,8 +358,13 @@ class Atem {
   int sockfd_;
 
   // Connection state
-  enum class ConnectionState { NOT_CONNECTED, CONNECTED, INITIALIZING, ACTIVE };
-  ConnectionState state_{ConnectionState::NOT_CONNECTED};
+  enum class ConnectionState {
+    kNotConnected,
+    kConnected,
+    kInitializing,
+    kActive
+  };
+  ConnectionState state_{ConnectionState::kNotConnected};
   uint16_t session_id_;
   uint16_t local_id_{0};
   uint16_t remote_id_{0};
