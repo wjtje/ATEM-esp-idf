@@ -47,7 +47,7 @@ class AtemCommand {
    *
    * @param version
    */
-  virtual void PrepairCommand(ProtocolVersion ver) {}
+  virtual void PrepairCommand(const ProtocolVersion &ver) {}
 
   /**
    * @brief Get the length of the command, this include the 8 bytes for the
@@ -168,7 +168,7 @@ class DskAuto : public AtemCommand {
    * @param keyer[in] Which keyer to perform the action on
    */
   DskAuto(uint8_t keyer) : AtemCommand("DDsA", 12), keyer_(keyer) {}
-  void PrepairCommand(ProtocolVersion ver) override {
+  void PrepairCommand(const ProtocolVersion &ver) override {
     if (ver.major <= 2 && ver.minor <= 27) {
       GetData<uint8_t *>()[0] = this->keyer_;
     } else {

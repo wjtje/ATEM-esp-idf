@@ -8,11 +8,6 @@ ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
 // MARK: Constructor and deconstructor
 
 Atem::Atem(const char *address) {
-  // Clear variables
-  memset(&this->top_, 0, sizeof(this->top_));
-  memset(&this->ver_, 0, sizeof(this->ver_));
-  memset(&this->mpl_, 0, sizeof(this->mpl_));
-
   // Try to create a socket
   struct addrinfo hints, *servinfo, *p;
   int rv;
@@ -91,8 +86,12 @@ Atem::~Atem() {
 
   // Clear memory
   xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
-  for (std::pair<uint16_t, char *> file : this->mpf_) free(file.second);
-  this->mpf_.clear();
+  for (auto &file : this->media_player_file_) {
+    if (file.second.IsValid()) {
+      free(file.second.Get());
+    }
+  }
+  this->media_player_file_.clear();
   xSemaphoreGive(this->state_mutex_);
 }
 
@@ -201,9 +200,11 @@ void Atem::task_() {
       this->state_ = ConnectionState::ACTIVE;
 
       // Send event's
+      uint16_t packet_id = 1;  // Init packet ID
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++)
         if (boot_events & 1 << i) {
-          esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
+          ESP_ERROR_CHECK_WITHOUT_ABORT(
+              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0));
         }
     }
 
@@ -249,13 +250,13 @@ void Atem::task_() {
         this->SendPacket_(&p);
       }
 
-      if (!this->received_.Add(packet.GetId())) {
+      if (!this->sqeuence_.Add(packet.GetId())) {
         ESP_LOGD(TAG, "Received duplicate packet with id %u", packet.GetId());
         continue;  // We can ignore this packet
       }
 
       // Check if we are receiving it in order
-      int16_t missing_id = this->received_.GetMissing();
+      int16_t missing_id = this->sqeuence_.GetMissing();
       if (missing_id >= 0) {
         ESP_LOGW(TAG, "Missing packet %u, trying to request it", missing_id);
 
@@ -308,8 +309,7 @@ void Atem::task_() {
     uint32_t event = 0;
 
     // Initialize common variables
-    uint8_t me, keyer, channel, state, mediaplayer;
-    uint16_t pos;
+    uint8_t me, keyer, channel, mediaplayer;
     size_t len;
     Source source;
 
@@ -330,8 +330,12 @@ void Atem::task_() {
       switch (ATEM_CMD(((char *)command.GetCmd()))) {
         case ATEM_CMD("_mpl"): {  // Media Player
           event |= 1 << ATEM_EVENT_MEDIA_PLAYER;
-          this->mpl_.still = command.GetData<uint8_t *>()[0];
-          this->mpl_.clip = command.GetData<uint8_t *>()[1];
+
+          const MediaPlayer media_player = {
+              .still = command.GetData<uint8_t *>()[0],
+              .clip = command.GetData<uint8_t *>()[1],
+          };
+          this->media_player_.Set(this->sqeuence_, media_player);
           break;
         }
         case ATEM_CMD("_MeC"): {  // Mix Effect Config
@@ -339,49 +343,56 @@ void Atem::task_() {
           uint8_t me = command.GetData(0);
           uint8_t num_keyer = command.GetData(1);
 
-          if (this->me_.size() <= me) break;
-
-          this->me_[me].keyer.resize(num_keyer);
+          if (this->mix_effect_.size() <= me) break;
+          this->mix_effect_[me].keyer.resize(num_keyer);
           break;
         }
         case ATEM_CMD("_ver"): {  // Protocol version
           event |= 1 << ATEM_EVENT_PROTOCOL_VERSION;
-          this->ver_ = {.major = ntohs(command.GetData<uint16_t *>()[0]),
-                        .minor = ntohs(command.GetData<uint16_t *>()[1])};
+
+          const ProtocolVersion version = {
+              .major = command.GetDataS<uint16_t>(0),
+              .minor = command.GetDataS<uint16_t>(1),
+          };
+          this->version_.Set(this->sqeuence_, version);
           break;
         }
         case ATEM_CMD("_pin"): {  // Product Id
           event |= 1 << ATEM_EVENT_PRODUCT_ID;
-          memcpy(this->pid_, command.GetData<char *>(), sizeof(this->pid_));
+          memcpy(this->product_id_, command.GetData<char *>(),
+                 sizeof(this->product_id_));
 
           len = strlen(command.GetData<char *>());
           if (len > 44) len = 44;
-          memset(this->pid_ + len, 0, sizeof(this->pid_) - len);
+          memset(this->product_id_ + len, 0, sizeof(this->product_id_) - len);
           break;
         }
         case ATEM_CMD("_top"): {  // Topology
           event |= 1 << ATEM_EVENT_TOPOLOGY;
 
-          this->top_.me = command.GetData(0);
-          this->top_.sources = command.GetData(1);
-          this->top_.dsk = command.GetData(2);
-          this->top_.aux = command.GetData(3);
-          this->top_.mixminus_outputs = command.GetData(4);
-          this->top_.mediaplayers = command.GetData(5);
-          this->top_.multiviewers = command.GetData(6);
-          this->top_.rs485 = command.GetData(7);
-          this->top_.hyperdecks = command.GetData(8);
-          this->top_.dve = command.GetData(9);
-          this->top_.stingers = command.GetData(10);
-          this->top_.supersources = command.GetData(11);
-          this->top_.talkback_channels = command.GetData(13);
-          this->top_.camera_control = command.GetData(18);
+          const Topology top = {
+              .me = command.GetData(0),
+              .sources = command.GetData(1),
+              .dsk = command.GetData(2),
+              .aux = command.GetData(3),
+              .mixminus_outputs = command.GetData(4),
+              .mediaplayers = command.GetData(5),
+              .multiviewers = command.GetData(6),
+              .rs485 = command.GetData(7),
+              .hyperdecks = command.GetData(8),
+              .dve = command.GetData(9),
+              .stingers = command.GetData(10),
+              .supersources = command.GetData(11),
+              .talkback_channels = command.GetData(13),
+              .camera_control = command.GetData(18),
+          };
+          topology_.Set(this->sqeuence_, top);
 
           // Resize buffers
-          this->me_.resize(this->top_.me);
-          this->dsk_.resize(this->top_.dsk);
-          this->aux_out_.resize(this->top_.aux);
-          this->mps_.resize(this->top_.mediaplayers);
+          this->mix_effect_.resize(top.me);
+          this->dsk_.resize(top.dsk);
+          this->aux_out_.resize(top.aux);
+          this->media_player_source_.resize(top.mediaplayers);
           break;
         }
         case ATEM_CMD("AuxS"): {  // AUX Select
@@ -389,19 +400,20 @@ void Atem::task_() {
           channel = command.GetData<uint8_t *>()[0];
           if (this->aux_out_.size() <= channel) break;
 
-          this->aux_out_[channel] =
-              (Source)ntohs(command.GetData<uint16_t *>()[1]);
+          this->aux_out_[channel].Set(this->sqeuence_,
+                                      command.GetDataS<Source>(1));
           break;
         }
         case ATEM_CMD("DskB"): {  // DSK Source
           event |= 1 << ATEM_EVENT_DSK;
-          keyer = command.GetData<uint8_t *>()[0];
+          keyer = command.GetData(0);
           if (this->dsk_.size() <= keyer) break;
 
-          this->dsk_[keyer].fill =
-              (Source)ntohs(command.GetData<uint16_t *>()[1]);
-          this->dsk_[keyer].key =
-              (Source)ntohs(command.GetData<uint16_t *>()[2]);
+          const DskSource source = {
+              .fill = command.GetDataS<Source>(1),
+              .key = command.GetDataS<Source>(2),
+          };
+          this->dsk_[keyer].source.Set(this->sqeuence_, source);
           break;
         }
         case ATEM_CMD("DskP"): {  // DSK Properties
@@ -409,7 +421,10 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[0];
           if (this->dsk_.size() <= keyer) break;
 
-          this->dsk_[keyer].tie = command.GetData<uint8_t *>()[1];
+          const DskProperties properties{
+              .tie = bool(command.GetData(1)),
+          };
+          this->dsk_[keyer].properties.Set(this->sqeuence_, properties);
           break;
         }
         case ATEM_CMD("DskS"): {  // DSK State
@@ -417,21 +432,25 @@ void Atem::task_() {
           keyer = command.GetData<uint8_t *>()[0];
           if (this->dsk_.size() <= keyer) break;
 
-          this->dsk_[keyer].on_air = command.GetData<uint8_t *>()[1];
-          this->dsk_[keyer].in_transition = command.GetData<uint8_t *>()[2];
-          this->dsk_[keyer].is_auto_transitioning =
-              command.GetData<uint8_t *>()[3];
+          const DskState state = {
+              .on_air = bool(command.GetData(1)),
+              .in_transition = bool(command.GetData(2)),
+              .is_auto_transitioning = bool(command.GetData(3)),
+          };
+          this->dsk_[keyer].state.Set(this->sqeuence_, state);
           break;
         }
         case ATEM_CMD("FtbS"): {  // Fade to black State
           event |= 1 << ATEM_EVENT_FADE_TO_BLACK;
           me = command.GetData<uint8_t *>()[0];
 
-          if (this->me_.size() <= me) break;
-          this->me_[me].ftb = {
+          const FadeToBlack ftb = {
               .fully_black = bool(command.GetData<uint8_t *>()[1]),
               .in_transition = bool(command.GetData<uint8_t *>()[2]),
           };
+
+          if (this->mix_effect_.size() <= me) break;
+          this->mix_effect_[me].ftb.Set(this->sqeuence_, ftb);
           break;
         }
         case ATEM_CMD("InPr"): {  // Input Property
@@ -452,85 +471,100 @@ void Atem::task_() {
                  sizeof(inpr.name_short));
 
           // Store inpr
-          this->input_properties_[source] = inpr;
+          auto it = input_properties_.find(source);
+          if (it != this->input_properties_.end()) {
+            (*it).second.Set(this->sqeuence_, inpr);
+          } else {
+            input_properties_.insert(
+                {source, AtemState(this->sqeuence_, inpr)});
+          }
 
           break;
         }
-        case ATEM_CMD("KeBP"): {  // Key properties
+        case ATEM_CMD("KeBP"): {  // Usk properties
           event |= 1 << ATEM_EVENT_USK;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->me_.size() <= me) break;
-          if (this->me_[me].keyer.size() <= keyer) break;
+          if (this->mix_effect_.size() <= me) break;
+          if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
-          atem::UskState &state = this->me_[me].keyer[keyer];
-          state.type = command.GetData<uint8_t *>()[2];
-          state.fill = (Source)ntohs(command.GetData<uint16_t *>()[3]);
-          state.key = (Source)ntohs(command.GetData<uint16_t *>()[4]);
-          state.top = int16_t(ntohs(command.GetData<uint16_t *>()[6]));
-          state.bottom = int16_t(ntohs(command.GetData<uint16_t *>()[7]));
-          state.left = int16_t(ntohs(command.GetData<uint16_t *>()[8]));
-          state.right = int16_t(ntohs(command.GetData<uint16_t *>()[9]));
+          const UskState state = {
+              .type = command.GetData<uint8_t *>()[2],
+              .fill = (Source)ntohs(command.GetData<uint16_t *>()[3]),
+              .key = (Source)ntohs(command.GetData<uint16_t *>()[4]),
+              .top = int16_t(ntohs(command.GetData<uint16_t *>()[6])),
+              .bottom = int16_t(ntohs(command.GetData<uint16_t *>()[7])),
+              .left = int16_t(ntohs(command.GetData<uint16_t *>()[8])),
+              .right = int16_t(ntohs(command.GetData<uint16_t *>()[9])),
+          };
 
+          this->mix_effect_[me].keyer[keyer].state.Set(this->sqeuence_, state);
           break;
         }
-        case ATEM_CMD("KeDV"): {  // Key properties DVE
+        case ATEM_CMD("KeDV"): {  // Usk properties DVE
           event |= 1 << ATEM_EVENT_USK;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->me_.size() <= me) break;
-          if (this->me_[me].keyer.size() <= keyer) break;
+          if (this->mix_effect_.size() <= me) break;
+          if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
-          atem::UskDveProperties &state = this->me_[me].keyer[keyer].dve_;
-
-          state.size_x = (int)ntohl(command.GetData<uint32_t *>()[1]);
-          state.size_y = (int)ntohl(command.GetData<uint32_t *>()[2]);
-          state.pos_x = (int)ntohl(command.GetData<uint32_t *>()[3]);
-          state.pos_y = (int)ntohl(command.GetData<uint32_t *>()[4]);
-          state.rotation = (int)ntohl(command.GetData<uint32_t *>()[5]);
+          const DveState properties = {
+              .size_x = (int)ntohl(command.GetData<uint32_t *>()[1]),
+              .size_y = (int)ntohl(command.GetData<uint32_t *>()[2]),
+              .pos_x = (int)ntohl(command.GetData<uint32_t *>()[3]),
+              .pos_y = (int)ntohl(command.GetData<uint32_t *>()[4]),
+              .rotation = (int)ntohl(command.GetData<uint32_t *>()[5]),
+          };
+          this->mix_effect_[me].keyer[keyer].dve.Set(this->sqeuence_,
+                                                     properties);
           break;
         }
-        case ATEM_CMD("KeFS"): {  // Key Fly State
+        case ATEM_CMD("KeFS"): {  // Usk Fly State
           event |= 1 < ATEM_EVENT_USK;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
           // Check if we have allocated memory for this
-          if (this->me_.size() <= me) break;
-          if (this->me_[me].keyer.size() <= keyer) break;
+          if (this->mix_effect_.size() <= me) break;
+          if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
-          this->me_[me].keyer[keyer].at_key_frame =
-              command.GetData<uint8_t *>()[6];
+          this->mix_effect_[me].keyer[keyer].at_key_frame.Set(
+              this->sqeuence_, command.GetData<uint8_t *>()[6]);
           break;
         }
         case ATEM_CMD("KeOn"): {  // Key on Air
           event |= 1 << ATEM_EVENT_USK;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
-          state = command.GetData<uint8_t *>()[2];
 
           // Check if we have allocated memory for this
-          if (this->me_.size() <= me) break;
+          if (this->mix_effect_.size() <= me) break;
           if (keyer > 15) break;
 
-          this->me_[me].usk_on_air &= ~(0x1 << keyer);
-          this->me_[me].usk_on_air |= (state << keyer);
+          auto &usk_on_air = this->mix_effect_[me].usk_on_air;
+          uint16_t state = usk_on_air.IsValid() ? usk_on_air.Get() : 0;
+
+          state &= ~(0x1 << keyer);
+          state |= (command.GetData<uint8_t *>()[2] << keyer);
+
+          usk_on_air.Set(this->sqeuence_, state);
           break;
         }
         case ATEM_CMD("MPCE"): {  // Media Player Source
           event |= 1 << ATEM_EVENT_MEDIA_PLAYER;
           mediaplayer = command.GetData<uint8_t *>()[0];
-          if (this->mps_.size() <= mediaplayer) break;
+          if (this->media_player_source_.size() <= mediaplayer) break;
 
-          this->mps_[mediaplayer] = {
-              .type = command.GetData<uint8_t *>()[1],
-              .still_index = command.GetData<uint8_t *>()[2],
-              .clip_index = command.GetData<uint8_t *>()[3],
+          const MediaPlayerSource source = {
+              .type = command.GetData(1),
+              .still_index = command.GetData(2),
+              .clip_index = command.GetData(3),
           };
+          this->media_player_source_[mediaplayer].Set(this->sqeuence_, source);
           break;
         }
         case ATEM_CMD("MPfe"): {  // Media Pool Frame Description
@@ -542,10 +576,10 @@ void Atem::task_() {
           event |= 1 << ATEM_EVENT_MEDIA_POOL;
 
           // Clear index
-          std::map<uint16_t, char *>::iterator it = this->mpf_.find(index);
-          if (it != this->mpf_.end()) {
-            free((*it).second);
-            this->mpf_.erase(it);
+          auto it = this->media_player_file_.find(index);
+          if (it != this->media_player_file_.end()) {
+            if ((*it).second.IsValid()) free((*it).second.Get());
+            (*it).second.Set(this->sqeuence_, nullptr);
           }
 
           // Store file
@@ -554,7 +588,14 @@ void Atem::task_() {
             uint8_t filename_len = command.GetData<uint8_t *>()[23];
             char *filename =
                 strndup(command.GetData<char *>() + 24, filename_len);
-            if (filename != nullptr) mpf_.insert({index, filename});
+
+            if (it != this->media_player_file_.end()) {
+              (*it).second.Set(this->sqeuence_, filename);
+            } else {
+              AtemState<char *> file;
+              file.Set(this->sqeuence_, filename);
+              media_player_file_.insert({index, file});
+            }
           }
           break;
         }
@@ -562,42 +603,52 @@ void Atem::task_() {
           event |= 1 << ATEM_EVENT_SOURCE;
           me = command.GetData<uint8_t *>()[0];
 
-          if (this->me_.size() <= me) break;
-          this->me_[me].program = command.GetDataS<Source>(1);
+          if (this->mix_effect_.size() <= me) break;
+          this->mix_effect_[me].program.Set(this->sqeuence_,
+                                            command.GetDataS<Source>(1));
           break;
         }
         case ATEM_CMD("PrvI"): {  // Preview Input
           event |= 1 << ATEM_EVENT_SOURCE;
           me = command.GetData<uint8_t *>()[0];
 
-          if (this->me_.size() <= me) break;
-          this->me_[me].preview = command.GetDataS<Source>(1);
+          if (this->mix_effect_.size() <= me) break;
+          this->mix_effect_[me].preview.Set(this->sqeuence_,
+                                            command.GetDataS<Source>(1));
           break;
         }
         case ATEM_CMD("StRS"): {  // Stream Status
           if (command.GetLength() != 12) continue;
           event |= 1 << ATEM_EVENT_STREAM;
-          this->stream_ = (StreamState)(command.GetData<uint8_t *>()[1]);
+          this->stream_.Set(this->sqeuence_,
+                            (StreamState)(command.GetData<uint8_t *>()[1]));
           break;
         }
         case ATEM_CMD("TrPs"): {  // Transition Position
           event |= 1 << ATEM_EVENT_TRANSITION_POSITION;
-          me = command.GetData<uint8_t *>()[0];
-          state = command.GetData<uint8_t *>()[1];
-          pos = ntohs(command.GetData<uint16_t *>()[2]);
 
-          if (this->me_.size() <= me) break;
-          this->me_[me].transition.in_transition = (bool)(state & 0x01);
-          this->me_[me].transition.position = pos;
+          me = command.GetData(0);
+          if (this->mix_effect_.size() <= me) break;
+
+          const TransitionPosition position = {
+              .in_transition = (bool)(command.GetData(1) & 0x01),
+              .position = command.GetDataS<uint16_t>(2),
+          };
+          this->mix_effect_[me].transition.position.Set(this->sqeuence_,
+                                                        position);
           break;
         }
         case ATEM_CMD("TrSS"): {  // Transition State
           event |= 1 << ATEM_EVENT_TRANSITION_STATE;
-          me = command.GetData<uint8_t *>()[0];
 
-          if (this->me_.size() <= me) break;
-          this->me_[me].transition.style = command.GetData<uint8_t *>()[1];
-          this->me_[me].transition.next = command.GetData<uint8_t *>()[2];
+          me = command.GetData(0);
+          if (this->mix_effect_.size() <= me) break;
+
+          const TransitionState state = {
+              .style = command.GetData(1),
+              .next = command.GetData(2),
+          };
+          this->mix_effect_[me].transition.state.Set(this->sqeuence_, state);
           break;
         }
       }
@@ -607,8 +658,12 @@ void Atem::task_() {
 
     // Send events
     if (event != 0 && this->state_ == ConnectionState::ACTIVE) {
+      uint16_t packet_id = packet.GetId();
+
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & 1 << i) esp_event_post(ATEM_EVENT, i, nullptr, 0, 0);
+        if (event & 1 << i)
+          ESP_ERROR_CHECK_WITHOUT_ABORT(
+              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0));
     } else {
       boot_events |= event;
     }
@@ -640,7 +695,7 @@ esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
   uint16_t i = 12;
   for (auto c : commands) {
     if (unlikely(c == nullptr)) continue;
-    c->PrepairCommand(this->ver_);
+    c->PrepairCommand(this->version_.Get());
     memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
     i += c->GetLength();
     delete c;
@@ -708,7 +763,27 @@ void Atem::Reconnect_() {
   this->local_id_ = 0;
   this->remote_id_ = 0;
   this->session_id_ = 0x0B06;
-  this->received_ = SequenceCheck();
+  this->sqeuence_ = SequenceCheck();
+
+  // Clear state
+  xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
+  this->input_properties_.clear();
+  this->topology_ = AtemState<Topology>();
+  this->version_ = AtemState<ProtocolVersion>();
+  this->media_player_ = AtemState<MediaPlayer>();
+  memset(this->product_id_, 0, sizeof(this->product_id_));
+  this->mix_effect_.clear();
+  this->dsk_.clear();
+  this->aux_out_.clear();
+  this->media_player_source_.clear();
+  for (auto &file : this->media_player_file_) {
+    if (file.second.IsValid()) {
+      free(file.second.Get());
+    }
+  }
+  this->media_player_file_.clear();
+  this->stream_ = AtemState<StreamState>();
+  xSemaphoreGive(this->state_mutex_);
 
   // Remove all packets
 #if CONFIG_ATEM_STORE_SEND

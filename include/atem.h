@@ -20,6 +20,7 @@
 
 #include "atem_command.h"
 #include "atem_packet.h"
+#include "atem_state.h"
 #include "atem_types.h"
 #include "sequence_check.h"
 
@@ -103,12 +104,69 @@ class Atem {
   ~Atem();
 
   /**
+   * @brief Get the State Mutex
+   *
+   * @warning Make sure you give the mutex back within 20ms or 16ms (e.g. 1
+   * frame)
+   *
+   * @return SemaphoreHandle_t
+   */
+  SemaphoreHandle_t GetStateMutex() const { return this->state_mutex_; }
+
+  // MARK: Direct state
+
+  /**
+   * @brief Get the map of input properties
+   *
+   * @warning Make sure your task has ownership over the atem state
+   *
+   * @return const std::map<Source, InputProperty> &
+   */
+  const std::map<Source, AtemState<InputProperty>>& GetInputProperties() const {
+    return this->input_properties_;
+  }
+
+  const std::vector<Dsk>& GetDsk() const { return this->dsk_; }
+  const std::vector<MixEffect>& GetMixEffect() const {
+    return this->mix_effect_;
+  }
+  const std::vector<AtemState<MediaPlayerSource>>& GetMediaPlayerSources()
+      const {
+    return this->media_player_source_;
+  }
+
+  /**
+   * @brief Get all sources that are currently displayed on a aux channel
+   *
+   * @warning This can be null, length can be determented using GetTopology
+   * @warning Make sure your task has ownership over the atem state
+   *
+   * @return Source*
+   */
+  const std::vector<AtemState<Source>>& GetAuxOutputs() const {
+    return this->aux_out_;
+  }
+
+  /**
+   * @brief Get the map of the Media Player File Names
+   *
+   * @warning Make sure your task has ownership over the atem state
+   *
+   * @return const std::map<uint16_t, char*> {index, file name}
+   */
+  const std::map<uint16_t, AtemState<char*>>& GetMediaPlayerFileName() const {
+    return this->media_player_file_;
+  }
+
+  // MARK: Parced state
+
+  /**
    * @brief Returns if the atem connection is active or not
    *
    * @return true The connection is active.
    * @return false The connection isn't active
    */
-  bool Connected() { return this->state_ == ConnectionState::ACTIVE; }
+  bool Connected() const { return this->state_ == ConnectionState::ACTIVE; }
   /**
    * @brief Get the source that's currently displayed of the aux channel. It
    * will return false when it's invalid.
@@ -118,16 +176,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetAuxOutput(Source* source, uint8_t channel);
-  /**
-   * @brief Get all sources that are currently displayed on a aux channel
-   *
-   * @warning This can be null, length can be determented using GetTopology
-   * @warning Make sure your task has ownership over the atem state
-   *
-   * @return Source*
-   */
-  const std::vector<Source>& GetAuxOutputs() { return this->aux_out_; }
+  bool GetAuxOutput(Source& source, uint8_t channel) const;
   /**
    * @brief Get the state of a DSK
    *
@@ -136,7 +185,25 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskState(DskState* state, uint8_t keyer);
+  bool GetDskState(DskState& state, uint8_t keyer) const;
+  /**
+   * @brief Get the current fill and key source of a DSK
+   *
+   * @param source[out] A variable that the state will be stored in
+   * @param keyer[in] Which keyer to use
+   *
+   * @return Weather or not the variable is valid
+   */
+  bool GetDskSource(DskSource& source, uint8_t keyer) const;
+  /**
+   * @brief Get the properties of a DSK
+   *
+   * @param properties[out] A variable that the state will be stored in
+   * @param keyer[in] Which keyer to use
+   *
+   * @return Weather or not the variable is valid
+   */
+  bool GetDskProperties(DskProperties& properties, uint8_t keyer) const;
   /**
    * @brief Get the state of the Fade to black on a specific MixEffect.
    *
@@ -145,33 +212,14 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetFtbState(FadeToBlack* state, uint8_t me);
-  /**
-   * @brief Get the map of input properties
-   *
-   * @warning Make sure your task has ownership over the atem state
-   *
-   * @return const std::map<Source, InputProperty> &
-   */
-  const std::map<Source, InputProperty>& GetInputProperties() {
-    return this->input_properties_;
-  }
-  /**
-   * @brief Get the State Mutex
-   *
-   * @warning Make sure you give the mutex back within 20ms or 16ms (e.g. 1
-   * frame)
-   *
-   * @return SemaphoreHandle_t
-   */
-  SemaphoreHandle_t GetStateMutex() const { return this->state_mutex_; }
+  bool GetFtbState(FadeToBlack& state, uint8_t me) const;
   /**
    * @brief Get information about the current stream state.
    *
    * @param state[out] A variable that will store the result
    * @return Weather or not the variable is valid
    */
-  bool GetStreamState(StreamState* state);
+  bool GetStreamState(StreamState& state) const;
   /**
    * @brief Get information about how many stills and clip the media player can
    * hold
@@ -180,7 +228,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayer(MediaPlayer* state);
+  bool GetMediaPlayer(MediaPlayer& state) const;
   /**
    * @brief Get the access to the active source on a specific mediaplayer
    *
@@ -189,17 +237,9 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayerSource(MediaPlayerSource* state, uint8_t mediaplayer);
-  /**
-   * @brief Get the map of the Media Player File Names
-   *
-   * @warning Make sure your task has ownership over the atem state
-   *
-   * @return const std::map<uint16_t, char*> {index, file name}
-   */
-  const std::map<uint16_t, char*>& GetMediaPlayerFileName() {
-    return this->mpf_;
-  }
+  bool GetMediaPlayerSource(MediaPlayerSource& state,
+                            uint8_t mediaplayer) const;
+
   /**
    * @brief Get the current preview source active on ME
    *
@@ -208,13 +248,13 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetPreviewInput(Source* source, uint8_t me);
+  bool GetPreviewInput(Source& source, uint8_t me) const;
   /**
    * @brief Get the Product Id (model) of the connected atem.
    *
    * @return const char*
    */
-  const char* GetProductId() const { return this->pid_; }
+  const char* GetProductId() const { return this->product_id_; }
   /**
    * @brief Get the current program source active on ME
    *
@@ -223,7 +263,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProgramInput(Source* source, uint8_t me);
+  bool GetProgramInput(Source& source, uint8_t me) const;
   /**
    * @brief Get the Protocol Version
    *
@@ -231,7 +271,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProtocolVersion(ProtocolVersion* version);
+  bool GetProtocolVersion(ProtocolVersion& version) const;
   /**
    * @brief Get the topology of the connected ATEM
    *
@@ -239,18 +279,27 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTopology(Topology* topology);
+  bool GetTopology(Topology& topology) const;
   /**
-   * @brief Get the information about the current transition on a ME
+   * @brief Get the information about the current transition state on a ME
    *
    * @param state[out] A variable that will store the current state
    * @param me[in] Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionState(TransitionState* state, uint8_t me);
+  bool GetTransitionState(TransitionState& state, uint8_t me) const;
   /**
-   * @brief Get the Usk Properties object
+   * @brief Get the information about the current transition position on a ME
+   *
+   * @position state[out] A variable that will store the current state
+   * @param me[in] Which ME to use
+   *
+   * @return Weather or not the variable is valid
+   */
+  bool GetTransitionPosition(TransitionPosition& position, uint8_t me) const;
+  /**
+   * @brief Get the Usk state
    *
    * @param state[out] A variable that will store the current state
    * @param me[in] Which MixEffect to use
@@ -258,7 +307,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskState(UskState* state, uint8_t me, uint8_t keyer);
+  bool GetUskState(UskState& state, uint8_t me, uint8_t keyer) const;
   /**
    * @brief Get the number of Usk on a given ME
    *
@@ -267,9 +316,9 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskNumber(uint8_t* number, uint8_t me);
+  bool GetUskNumber(uint8_t& number, uint8_t me) const;
   /**
-   * @brief Get the Usk Dve Properties object
+   * @brief Get is a USK is on air
    *
    * @param state[out] A variable that will store the current state
    * @param me[in] Which MixEffect to use
@@ -277,7 +326,17 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskOnAir(bool* state, uint8_t me, uint8_t keyer);
+  bool GetUskOnAir(bool& state, uint8_t me, uint8_t keyer) const;
+  /**
+   * @brief Get the Usk Dve state
+   *
+   * @param state[out] A variable that will store the current state
+   * @param me[in] Which MixEffect to use
+   * @param keyer[in] Which keyer to use
+   *
+   * @return Weather or not the variable is valid
+   */
+  bool GetUskDveState(DveState& state, uint8_t me, uint8_t keyer) const;
 
   /**
    * @brief Send a list of commands to the ATEM, memory is automaticaly
@@ -306,7 +365,7 @@ class Atem {
   uint16_t remote_id_{0};
 
   // Check missing packets
-  SequenceCheck received_;
+  SequenceCheck sqeuence_;
 
 // Packets send
 #if CONFIG_ATEM_STORE_SEND
@@ -316,17 +375,17 @@ class Atem {
 
   // ATEM state
   SemaphoreHandle_t state_mutex_{xSemaphoreCreateMutex()};
-  std::map<Source, InputProperty> input_properties_;
-  Topology top_;                           // Topology
-  ProtocolVersion ver_;                    // Protocol version
-  MediaPlayer mpl_;                        // Media player
-  char pid_[45] = {0};                     // Product Id
-  std::vector<MixEffectState> me_;         // [me]
-  std::vector<DskState> dsk_;              // [keyer]
-  std::vector<Source> aux_out_;            // Source in aux [aux]
-  std::vector<MediaPlayerSource> mps_;     // Media player source [mpl]
-  std::map<uint16_t, char*> mpf_;          // Media player file name
-  StreamState stream_{StreamState::IDLE};  // Stream state
+  std::map<Source, AtemState<InputProperty>> input_properties_;
+  AtemState<Topology> topology_;
+  AtemState<ProtocolVersion> version_;
+  AtemState<MediaPlayer> media_player_;
+  char product_id_[45] = {0};
+  std::vector<MixEffect> mix_effect_;
+  std::vector<Dsk> dsk_;
+  std::vector<AtemState<Source>> aux_out_;
+  std::vector<AtemState<MediaPlayerSource>> media_player_source_;
+  std::map<uint16_t, AtemState<char*>> media_player_file_;
+  AtemState<StreamState> stream_{StreamState::IDLE};
 
   TaskHandle_t task_handle_{nullptr};
   void task_();

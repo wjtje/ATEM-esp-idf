@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "atem_state.h"
+
 namespace atem {
 
 enum Source : uint16_t {
@@ -121,9 +123,12 @@ struct InputProperty {
   char name_short[4];
 };
 
-struct TransitionState {
+struct TransitionPosition {
   bool in_transition;
   uint16_t position;
+};
+
+struct TransitionState {
   uint8_t style;
   uint8_t next;
 };
@@ -147,7 +152,7 @@ struct Topology {
 
 enum class UskDveKeyFrame : uint8_t { A = 1, B, FULL, RUN_TO_INF };
 
-struct UskDveProperties {
+struct DveState {
   int size_x;
   int size_y;
   int pos_x;
@@ -181,17 +186,33 @@ struct UskState {
   int16_t bottom;
   int16_t left;
   int16_t right;
-  bool at_key_frame;
-  UskDveProperties dve_;
+};
+
+struct Usk {
+  AtemState<UskState> state;
+  AtemState<bool> at_key_frame;
+  AtemState<DveState> dve;
 };
 
 struct DskState {
   bool on_air;
-  bool tie;
   bool in_transition;
   bool is_auto_transitioning;
+};
+
+struct DskSource {
   Source fill;
   Source key;
+};
+
+struct DskProperties {
+  bool tie;
+};
+
+struct Dsk {
+  AtemState<DskState> state;
+  AtemState<DskSource> source;
+  AtemState<DskProperties> properties;
 };
 
 struct FadeToBlack {
@@ -199,13 +220,16 @@ struct FadeToBlack {
   bool in_transition;
 };
 
-struct MixEffectState {
-  Source program;
-  Source preview;
-  uint16_t usk_on_air;
-  TransitionState transition;
-  std::vector<UskState> keyer;
-  FadeToBlack ftb;
+struct MixEffect {
+  AtemState<Source> program;
+  AtemState<Source> preview;
+  AtemState<uint16_t> usk_on_air;
+  struct {
+    AtemState<TransitionPosition> position;
+    AtemState<TransitionState> state;
+  } transition;
+  AtemState<FadeToBlack> ftb;
+  std::vector<Usk> keyer;
 };
 
 enum class StreamState { IDLE = 1, STARTING = 2, STREAMING = 4 };

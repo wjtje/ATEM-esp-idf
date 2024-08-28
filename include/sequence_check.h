@@ -91,14 +91,10 @@ class SequenceCheck {
    * @brief Returns weather the id is new than the last id
    *
    * @param id[in]
-   * @return true
+   * @return true When the parameter id is newer
    * @return false
    */
-  bool IsNewer(int16_t id) const {
-    if (!this->Contains(id)) return false;
-    const uint16_t recv_len = sizeof(this->received_) * 8;
-    return ((this->last_id_ - id) & INT16_MAX) < recv_len;
-  }
+  inline bool IsNewer(int16_t id) const { return this->last_id_ < id; }
 
  protected:
   int16_t offset_{1}, last_id_{0};

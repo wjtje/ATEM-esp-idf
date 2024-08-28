@@ -7,7 +7,12 @@
  */
 #pragma once
 
+#include <esp_log.h>
 #include <stdint.h>
+
+#if CONFIG_COMPILER_CXX_RTTI
+#include <typeinfo>
+#endif
 
 #include "sequence_check.h"
 
@@ -16,16 +21,28 @@ namespace atem {
 template <typename T>
 class AtemState {
  public:
-  AtemState(const T& initial_state = T())
-      : last_change_id_(0), state_(initial_state) {}
+  AtemState(const SequenceCheck& sequence, const T& state)
+      : last_change_id_(sequence.GetLastId()), state_(state) {}
+
+  AtemState(const T& state = T()) : last_change_id_(INT16_MIN), state_(state) {}
 
   ~AtemState() {}
 
-  inline bool operator==(int16_t id) { return this->last_change_id_ == id; }
-  inline bool operator<(const AtemState<T>& rhs) {
+  inline bool operator==(int16_t id) const {
+    return this->last_change_id_ == id;
+  }
+
+  inline bool operator<(const AtemState<T>& rhs) const {
     return this.last_change_id_ < rhs.last_change_id_;
   }
 
+  /**
+   * @brief Returns weather or not this variable is valid.
+   *
+   * @return true
+   * @return false
+   */
+  inline bool IsValid() const { return this->last_change_id_ != INT16_MIN; }
   /**
    * @brief Returns a reference to the state.
    *
@@ -39,9 +56,17 @@ class AtemState {
    * @param state[in] The new state
    * @return bool This returns true when the state has been changed.
    */
-  inline bool Set(SequenceCheck sequence, const T& state) {
-    // Check if the current data is
-    if (sequence.IsNewer(this->last_change_id_)) return false;
+  bool Set(const SequenceCheck& sequence, const T& state) {
+    // Check if the current data is newer
+    if (sequence.IsNewer(this->last_change_id_)) {
+#if CONFIG_COMPILER_CXX_RTTI
+      ESP_LOGD("AtemState", "%s: %u > %u", typeid(T).name(),
+               this->last_change_id_, sequence.GetLastId());
+#endif
+      return false;
+    }
+
+    this->last_change_id_ = sequence.GetLastId();
     this->state_ = state;
     return true;
   }
@@ -49,11 +74,18 @@ class AtemState {
    * @brief This will "reset" the last change id. This can be executed when a
    * rollover has happened.
    */
-  inline void ResetLastChangeId() { this->last_change_id_ = 0; }
+  inline void ResetLastChangeId() { this->last_change_id_ = INT16_MIN + 1; }
+  /**
+   * @brief Returns the packet id when this state was last changed.
+   *
+   * This can be INT16_MIN when it has not been set,
+   * or INT16_MIN + 1 when there was a rollover.
+   */
+  inline uint16_t GetPacketId() const { return this->last_change_id_; }
 
  protected:
   int16_t last_change_id_;
-  const T state_;
+  T state_;
 };
 
 }  // namespace atem
