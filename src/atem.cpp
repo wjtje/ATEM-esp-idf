@@ -505,7 +505,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("KeDV"): {  // Usk properties DVE
-          event |= 1 << ATEM_EVENT_USK;
+          event |= 1 << ATEM_EVENT_USK_DVE;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 

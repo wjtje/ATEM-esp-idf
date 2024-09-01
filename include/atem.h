@@ -52,9 +52,13 @@ enum : int32_t {
    */
   ATEM_EVENT_INPUT_PROPERTIES,
   /**
-   * @brief KeBP / KeDV / KeFS / KeOn
+   * @brief KeBP / KeFS / KeOn
    */
   ATEM_EVENT_USK,
+  /**
+   * @brief KeDV
+   */
+  ATEM_EVENT_USK_DVE,
   /**
    * @brief _mpl / MPCE
    */
