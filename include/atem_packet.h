@@ -72,6 +72,7 @@ class AtemPacket {
 
   void SetAckId(int16_t id) { ((int16_t*)this->data_)[2] = htons(id); }
   void SetResendId(int16_t id) { ((int16_t*)this->data_)[3] = htons(id); }
+  void SetUnknown(int16_t id) { ((int16_t*)this->data_)[4] = htons(id); }
   void SetId(int16_t id) { ((int16_t*)this->data_)[5] = htons(id); }
 
   struct Iterator {

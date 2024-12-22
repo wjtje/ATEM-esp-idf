@@ -258,12 +258,14 @@ void Atem::task_() {
 
       // Check if we are receiving it in order
       int16_t missing_id = this->sqeuence_.GetMissing();
-      if (missing_id >= 0) {
+      if (missing_id >= 0 && state_ == ConnectionState::kActive) {
         ESP_LOGW(TAG, "Missing packet %u, trying to request it", missing_id);
 
         // Request missing
         AtemPacket p = AtemPacket(0x8, this->session_id_, 12);
         p.SetResendId(missing_id);
+        p.SetId(0);
+        p.SetUnknown(0x100);
         this->SendPacket_(&p);
       }
     }
