@@ -243,31 +243,33 @@ void Atem::task_() {
     // Send ACK
     if (packet.GetFlags() & 0x1) {
       this->remote_id_ = packet.GetId();
+      bool should_parse_packet = true;
 
-      // Respond to ACK
-      if (this->state_ == ConnectionState::kActive) {
-        AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
-        p.SetAckId(this->remote_id_);
-        this->SendPacket_(&p);
-      }
+      AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
+      p.SetAckId(this->remote_id_);
 
       if (!this->sqeuence_.Add(packet.GetId())) {
         ESP_LOGD(TAG, "Received duplicate packet with id %u", packet.GetId());
-        continue;  // We can ignore this packet
+        should_parse_packet = false;  // We can ignore this packet
       }
 
       // Check if we are receiving it in order
-      int16_t missing_id = this->sqeuence_.GetMissing();
-      if (missing_id >= 0 && state_ == ConnectionState::kActive) {
+      const int16_t missing_id = this->sqeuence_.GetMissing();
+      if (missing_id >= 0) {
         ESP_LOGW(TAG, "Missing packet %u, trying to request it", missing_id);
 
         // Request missing
-        AtemPacket p = AtemPacket(0x8, this->session_id_, 12);
+        p.SetFlags(p.GetFlags() | 0x8);
         p.SetResendId(missing_id);
         p.SetId(0);
         p.SetUnknown(0x100);
+      }
+
+      if (state_ == ConnectionState::kActive || missing_id >= 0) {
         this->SendPacket_(&p);
       }
+
+      if (!should_parse_packet) continue;
     }
 
 #if CONFIG_ATEM_STORE_SEND

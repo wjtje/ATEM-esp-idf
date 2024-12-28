@@ -35,6 +35,7 @@ class AtemPacket {
    *
    * @note 0x1 - ACK (request)
    * @note 0x2 - INIT
+   * @note 0x4 - RETRANSMISSION
    * @note 0x8 - RESEND
    * @note 0x10 - ACK (response)
    *
@@ -70,6 +71,10 @@ class AtemPacket {
   int16_t GetResendId() { return ntohs(((int16_t*)this->data_)[3]); }
   int16_t GetId() { return ntohs(((int16_t*)this->data_)[5]); }
 
+  void SetFlags(uint8_t flags) {
+    const uint8_t byte = ((uint8_t*)this->data_)[0];
+    ((uint8_t*)this->data_)[0] = flags << 3 | (byte & 0x7);
+  }
   void SetAckId(int16_t id) { ((int16_t*)this->data_)[2] = htons(id); }
   void SetResendId(int16_t id) { ((int16_t*)this->data_)[3] = htons(id); }
   void SetUnknown(int16_t id) { ((int16_t*)this->data_)[4] = htons(id); }
