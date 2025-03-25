@@ -36,6 +36,11 @@ class AtemState {
     return this.last_change_id_ < rhs.last_change_id_;
   }
 
+  inline const T& operator*() const { return this->state_; }
+  inline const T* operator->() const { return std::addressof(this->state_); }
+
+  inline operator bool() const { return this->IsValid(); }
+
   /**
    * @brief Returns weather or not this variable is valid.
    *

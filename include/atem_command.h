@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include <initializer_list>
+#include <optional>
 #include <tuple>
 
 #include "atem_types.h"
@@ -466,10 +467,14 @@ class TransitionState : public AtemCommand {
    * @param next[in] A bitmask of the Keyers active
    * @param me[in] Which MixEffect to perform this action on
    */
-  TransitionState(uint8_t next, uint8_t me) : AtemCommand("CTTp", 12) {
-    GetData<uint8_t *>()[0] = 0x2;  // Mask
+  TransitionState(std::optional<TransitionStyle> style,
+                  std::optional<uint8_t> next, uint8_t me)
+      : AtemCommand("CTTp", 12) {
+    GetData<uint8_t *>()[0] =
+        (style.has_value() ? (1 << 0) : 0) | (next.has_value() ? (1 << 1) : 0);
     GetData<uint8_t *>()[1] = me;
-    GetData<uint8_t *>()[3] = next;
+    GetData<uint8_t *>()[2] = style.value_or(TransitionStyle::MIX);
+    GetData<uint8_t *>()[3] = next.value_or(0);
   }
 };
 

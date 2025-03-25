@@ -202,7 +202,7 @@ void Atem::task_() {
       // Send event's
       uint16_t packet_id = 1;  // Init packet ID
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++) {
-        if (boot_events & 1 << i) {
+        if (boot_events & (1 << i)) {
           ESP_ERROR_CHECK_WITHOUT_ABORT(
               esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0));
         }
@@ -650,7 +650,7 @@ void Atem::task_() {
           if (this->mix_effect_.size() <= me) break;
 
           const TransitionState state = {
-              .style = command.GetData(1),
+              .style = static_cast<TransitionStyle>(command.GetData(1)),
               .next = command.GetData(2),
           };
           this->mix_effect_[me].transition.state.Set(this->sqeuence_, state);
@@ -666,7 +666,7 @@ void Atem::task_() {
       uint16_t packet_id = packet.GetId();
 
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & 1 << i)
+        if (event & (1 << i))
           ESP_ERROR_CHECK_WITHOUT_ABORT(
               esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0));
     } else {

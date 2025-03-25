@@ -115,6 +115,12 @@ enum Source : uint16_t {
   UNDEFINED = 0xFFFF
 };
 
+enum TransitionStyle : uint8_t {
+  MIX = 0,
+  DIP = 1,
+  WIPE = 2,
+};
+
 struct InputProperty {
   /// @warning This string is not NULL terminated
   char name_long[20];
@@ -129,7 +135,7 @@ struct TransitionPosition {
 };
 
 struct TransitionState {
-  uint8_t style;
+  TransitionStyle style;
   uint8_t next;
 };
 
