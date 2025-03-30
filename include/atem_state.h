@@ -49,6 +49,21 @@ class AtemState {
    */
   inline bool IsValid() const { return this->last_change_id_ != INT16_MIN; }
   /**
+   * @brief Returns true when the packet id is newer (or the same) as the last
+   * change id of this state
+   *
+   * E.g. returns true when the state has newer data than the given id
+   *
+   * @param id
+   * @return true
+   * @return false
+   */
+  inline bool IsNewer(const int16_t id) const {
+    if (!this->IsValid()) return false;
+    if (id == 0) return true;
+    return this->last_change_id_ > 0 && id <= this->last_change_id_;
+  }
+  /**
    * @brief Returns a reference to the state.
    *
    * @return const T&
@@ -86,7 +101,7 @@ class AtemState {
    * This can be INT16_MIN when it has not been set,
    * or INT16_MIN + 1 when there was a rollover.
    */
-  inline uint16_t GetPacketId() const { return this->last_change_id_; }
+  inline int16_t GetPacketId() const { return this->last_change_id_; }
 
  protected:
   int16_t last_change_id_;

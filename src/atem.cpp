@@ -570,20 +570,13 @@ void Atem::task_() {
           if (type != 0) break;  // Only work with stills
           event |= 1 << ATEM_EVENT_MEDIA_POOL;
 
-          // Clear index
-          auto it = this->media_player_file_.find(index);
-          if (it != this->media_player_file_.end())
-            this->media_player_file_.erase(it);
+          const std::string name =
+              is_used ? std::string(command.GetData<char *>() + 24,
+                                    command.GetData<uint8_t *>()[23])
+                      : std::string();
 
-          // Store file
-          if (is_used) {
-            const std::string file_name =
-                std::string(command.GetData<char *>() + 24,
-                            command.GetData<uint8_t *>()[23]);
-
-            this->media_player_file_.insert(
-                {index, AtemState(this->sqeuence_, std::move(file_name))});
-          }
+          this->media_player_file_.insert_or_assign(
+              index, AtemState(this->sqeuence_, std::move(name)));
           break;
         }
         case ATEM_CMD("PrgI"): {  // Program Input
