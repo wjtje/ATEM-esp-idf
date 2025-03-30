@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -158,7 +159,8 @@ class Atem {
    *
    * @return const std::map<uint16_t, char*> {index, file name}
    */
-  const std::map<uint16_t, AtemState<char*>>& GetMediaPlayerFileName() const {
+  const std::map<uint16_t, AtemState<std::string>>& GetMediaPlayerFileName()
+      const {
     return this->media_player_file_;
   }
 
@@ -393,7 +395,7 @@ class Atem {
   std::vector<Dsk> dsk_;
   std::vector<AtemState<Source>> aux_out_;
   std::vector<AtemState<MediaPlayerSource>> media_player_source_;
-  std::map<uint16_t, AtemState<char*>> media_player_file_;
+  std::map<uint16_t, AtemState<std::string>> media_player_file_;
   AtemState<StreamState> stream_{StreamState::IDLE};
 
   TaskHandle_t task_handle_{nullptr};

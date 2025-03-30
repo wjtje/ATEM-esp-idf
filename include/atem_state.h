@@ -26,7 +26,7 @@ class AtemState {
 
   AtemState(const T& state = T()) : last_change_id_(INT16_MIN), state_(state) {}
 
-  ~AtemState() {}
+  ~AtemState() = default;
 
   inline bool operator==(int16_t id) const {
     return this->last_change_id_ == id;

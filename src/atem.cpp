@@ -83,16 +83,6 @@ Atem::~Atem() {
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
 #endif
-
-  // Clear memory
-  xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
-  for (auto &file : this->media_player_file_) {
-    if (file.second.IsValid()) {
-      free(file.second.Get());
-    }
-  }
-  this->media_player_file_.clear();
-  xSemaphoreGive(this->state_mutex_);
 }
 
 // MARK: Background task
@@ -582,25 +572,17 @@ void Atem::task_() {
 
           // Clear index
           auto it = this->media_player_file_.find(index);
-          if (it != this->media_player_file_.end()) {
-            if ((*it).second.IsValid()) free((*it).second.Get());
-            (*it).second.Set(this->sqeuence_, nullptr);
-          }
+          if (it != this->media_player_file_.end())
+            this->media_player_file_.erase(it);
 
           // Store file
           if (is_used) {
-            // Create a copy of the filename
-            uint8_t filename_len = command.GetData<uint8_t *>()[23];
-            char *filename =
-                strndup(command.GetData<char *>() + 24, filename_len);
+            const std::string file_name =
+                std::string(command.GetData<char *>() + 24,
+                            command.GetData<uint8_t *>()[23]);
 
-            if (it != this->media_player_file_.end()) {
-              (*it).second.Set(this->sqeuence_, filename);
-            } else {
-              AtemState<char *> file;
-              file.Set(this->sqeuence_, filename);
-              media_player_file_.insert({index, file});
-            }
+            this->media_player_file_.insert(
+                {index, AtemState(this->sqeuence_, std::move(file_name))});
           }
           break;
         }
@@ -781,11 +763,6 @@ void Atem::Reconnect_() {
   this->dsk_.clear();
   this->aux_out_.clear();
   this->media_player_source_.clear();
-  for (auto &file : this->media_player_file_) {
-    if (file.second.IsValid()) {
-      free(file.second.Get());
-    }
-  }
   this->media_player_file_.clear();
   this->stream_ = AtemState<StreamState>();
   xSemaphoreGive(this->state_mutex_);
