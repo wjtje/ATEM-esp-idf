@@ -14,6 +14,7 @@
 #include <initializer_list>
 #include <optional>
 #include <tuple>
+#include <utility>
 
 #include "atem_types.h"
 
@@ -79,7 +80,10 @@ class AtemCommand {
    * @param i
    * @return The byte at i position
    */
-  uint8_t GetData(size_t i) { return ((uint8_t *)this->data_)[8 + i]; }
+  template <typename T = uint8_t>
+  T GetData(size_t i) {
+    return T(((uint8_t *)this->data_)[8 + i]);
+  }
   /**
    * @brief Get the data from the command (excluding the header), short (2
    * bytes) allinged. This function auto converts from network order to host
@@ -104,7 +108,7 @@ class AtemCommand {
    */
   template <typename T>
   T GetDataL(size_t i) {
-    return (T)ntohl(((uint16_t *)this->data_)[2 + i]);
+    return (T)ntohl(((uint32_t *)this->data_)[2 + i]);
   }
   /**
    * @brief Get the access to the raw buffer, use GetLength to get the size of
@@ -254,14 +258,16 @@ class MediaPlayerSource : public AtemCommand {
   /**
    * @brief Change the source of a mediaplayer
    *
-   * @param mediaplayer[in] Which media player to change
-   * @param mask[in] Which fields are valid (3 for type and still)
-   * @param type[in|optional] Which type the media player is in (1 for still)
-   * @param still[in|optional] The new still source
-   * @param clip[in|optional] The new clip source
+   * @param [in] mediaplayer Which media player to change
+   * @param [in] mask Which fields are valid (3 for type and still)
+   * @param [in|optional] type Which type the media player is in (1 for still)
+   * @param [in|optional] still The new still source
+   * @param [in|optional] clip The new clip source
    */
-  MediaPlayerSource(uint8_t mediaplayer, uint8_t mask, uint8_t type,
-                    uint8_t still, uint8_t clip)
+  MediaPlayerSource(
+      uint8_t mediaplayer, uint8_t mask, uint8_t type, uint8_t still,
+      uint8_t clip
+  )
       : AtemCommand("MPSS", 16) {
     GetData<uint8_t *>()[0] = mask;
     GetData<uint8_t *>()[1] = mediaplayer;
@@ -276,20 +282,23 @@ class UskDveKeyFrameProperties : public AtemCommand {
   /**
    * @brief Change the DVE properties of an Upstream Keyer.
    *
-   * @param key_frame[in] Which frame to change (A or B)
-   * @param p[in] A list of properties to change
-   * @param keyer[in] Which Upstream Keyer to perform this action on
-   * @param me[in] Which MixEffect to perform this action on
+   * @tparam Container
+   * @tparam Args
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] keyer Which Upstream Keyer to perform this action on
+   * @param [in] key_frame Which frame to change (A or B)
+   * @param [in] p A list of properties to change
    */
+  template <template <class...> class Container, class... Args>
   UskDveKeyFrameProperties(
-      UskDveKeyFrame key_frame,
-      std::initializer_list<std::tuple<UskDveProperty, int>> p, uint8_t keyer,
-      uint8_t me)
+      uint8_t me, uint8_t keyer, UskDveKeyFrame key_frame,
+      Container<std::pair<UskDveProperty, int>, Args...> &p
+  )
       : AtemCommand("CKFP", 64) {
     uint32_t mask = 0;
 
     for (auto c : p) {
-      const auto [property, value] = c;
+      const auto &[property, value] = c;
       mask |= 1 << (uint8_t)property;
       ((uint32_t *)this->data_)[4 + (uint8_t)property] = htonl(value);
     }
@@ -297,28 +306,30 @@ class UskDveKeyFrameProperties : public AtemCommand {
     GetData<uint32_t *>()[0] = htonl(mask);
     GetData<uint8_t *>()[4] = me;
     GetData<uint8_t *>()[5] = keyer;
-    GetData<uint8_t *>()[6] = (uint8_t)key_frame;
+    GetData<uint8_t *>()[6] = std::to_underlying(key_frame);
   }
 };
 
 class UskDveRunFlyingKey : public AtemCommand {
  public:
   /**
-   * @brief Perform a Run to INF on a specific Upsteam Keyer
+   * @brief Perform a run to keyframe a keyer
    *
-   * @param key_frame[in] Which frame to change (A or B)
-   * @param run_to_inf_i[in] Run to infinite index
-   * @param keyer[in] Which Upstream Keyer to perform this action on
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] keyer Which Upstream Keyer to perform this action on
+   * @param [in] key_frame Which frame to change (A or B)
+   * @param [in] run_to_inf_i Run to infinite index
    */
-  UskDveRunFlyingKey(UskDveKeyFrame key_frame, uint8_t run_to_inf_i,
-                     uint8_t keyer, uint8_t me)
+  UskDveRunFlyingKey(
+      uint8_t me, uint8_t keyer, UskDveKeyFrame key_frame,
+      std::optional<uint8_t> run_to_inf_i = std::nullopt
+  )
       : AtemCommand("RFlK", 16) {
     GetData<uint8_t *>()[0] = 0;
     GetData<uint8_t *>()[1] = me;
     GetData<uint8_t *>()[2] = keyer;
-    GetData<uint8_t *>()[4] = (uint8_t)key_frame;
-    GetData<uint8_t *>()[5] = run_to_inf_i;
+    GetData<uint8_t *>()[4] = std::to_underlying(key_frame);
+    GetData<uint8_t *>()[5] = run_to_inf_i.value_or(0);
   }
 };
 
@@ -327,17 +338,22 @@ class UskDveProperties : public AtemCommand {
   /**
    * @brief Change the current state of the DVE on a Upstream Keyer
    *
-   * @param p[in] List of properties to change
-   * @param keyer[in] Which Upstream Keyer to perform this action on
-   * @param me[in] Which MixEffect to perform this action on
+   * @tparam Container
+   * @tparam Args
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] keyer Which Upstream Keyer to perform this action on
+   * @param [in] p List of properties to change
    */
-  UskDveProperties(std::initializer_list<std::tuple<UskDveProperty, int>> p,
-                   uint8_t keyer, uint8_t me)
+  template <template <class...> class Container, class... Args>
+  UskDveProperties(
+      uint8_t me, uint8_t keyer,
+      Container<std::pair<UskDveProperty, int>, Args...> &p
+  )
       : AtemCommand("CKDV", 72) {
     uint32_t mask = 0;
 
     for (auto c : p) {
-      const auto [property, value] = c;
+      const auto &[property, value] = c;
       mask |= 1 << (uint8_t)property;
       ((uint32_t *)this->data_)[4 + (uint8_t)property] = htonl(value);
     }
@@ -353,11 +369,28 @@ class UskFill : public AtemCommand {
   /**
    * @brief Change the fill source on a Upstream Keyer
    *
-   * @param source[in] The new source
-   * @param keyer[in] Which Upstream Keyer to perform this action on
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] keyer Which Upstream Keyer to perform this action on
+   * @param [in] source The new source
    */
-  UskFill(Source source, uint8_t keyer, uint8_t me) : AtemCommand("CKeF", 12) {
+  UskFill(uint8_t me, uint8_t keyer, Source source) : AtemCommand("CKeF", 12) {
+    GetData<uint8_t *>()[0] = me;
+    GetData<uint8_t *>()[1] = keyer;
+    GetData<uint16_t *>()[1] = htons(source);
+  }
+};
+
+class UskKey : public AtemCommand {
+ public:
+  /**
+   * @brief Change the key source on a Upstream Keyer
+   * @warning This only works if the type is a LUMA keyer
+   *
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] keyer Which Upstream Keyer to perform this action on
+   * @param [in] source The new source
+   */
+  UskKey(uint8_t me, uint8_t keyer, Source source) : AtemCommand("CKeC", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint8_t *>()[1] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
@@ -369,15 +402,32 @@ class UskType : public AtemCommand {
   /**
    * @brief Change the type of the Upstream Keyer
    *
-   * @param type[in] The type of the USK (2 is DVE)
-   * @param keyer[in] Which Upstream Keyer to perform this action on
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] keyer Which Upstream Keyer to perform this action on
+   * @param [in] type The type of the USK
+   * @param [in] flying_key_enabled
    */
-  UskType(uint8_t type, uint8_t keyer, uint8_t me) : AtemCommand("CKTp", 16) {
-    GetData<uint8_t *>()[0] = 1;  // Mask
+  UskType(
+      uint8_t me, int8_t keyer, std::optional<UskKeyerType> type,
+      std::optional<bool> flying_key_enabled
+  )
+      : AtemCommand("CKTp", 16) {
+    uint8_t mask = 0;
+
     GetData<uint8_t *>()[1] = me;
     GetData<uint8_t *>()[2] = keyer;
-    GetData<uint8_t *>()[3] = type;
+
+    if (type.has_value()) {
+      mask |= 0x01;
+      GetData<uint8_t *>()[3] = std::to_underlying(*type);
+    }
+
+    if (flying_key_enabled.has_value()) {
+      mask |= 0x02;
+      GetData<uint8_t *>()[4] = *flying_key_enabled ? 1 : 0;
+    }
+
+    GetData<uint8_t *>()[0] = mask;
   }
 };
 
@@ -386,11 +436,11 @@ class UskOnAir : public AtemCommand {
   /**
    * @brief Change the On air state of a Upstream Keyer
    *
-   * @param enabled[in] The new state of the USK
-   * @param keyer[in] Which Upstream Keyer to perform this action on
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] keyer Which Upstream Keyer to perform this action on
+   * @param [in] enabled The new state of the USK
    */
-  UskOnAir(bool enabled, uint8_t key, uint8_t me) : AtemCommand("CKOn", 12) {
+  UskOnAir(uint8_t me, uint8_t key, bool enabled) : AtemCommand("CKOn", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint8_t *>()[1] = key;
     GetData<uint8_t *>()[2] = enabled;
@@ -467,8 +517,10 @@ class TransitionState : public AtemCommand {
    * @param next[in] A bitmask of the Keyers active
    * @param me[in] Which MixEffect to perform this action on
    */
-  TransitionState(std::optional<TransitionStyle> style,
-                  std::optional<uint8_t> next, uint8_t me)
+  TransitionState(
+      std::optional<TransitionStyle> style, std::optional<uint8_t> next,
+      uint8_t me
+  )
       : AtemCommand("CTTp", 12) {
     GetData<uint8_t *>()[0] =
         (style.has_value() ? (1 << 0) : 0) | (next.has_value() ? (1 << 1) : 0);

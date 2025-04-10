@@ -45,8 +45,9 @@ Atem::Atem(const char *address) {
   struct timeval timeout;
   timeout.tv_sec = 1;
   timeout.tv_usec = 0;
-  if ((rv = setsockopt(this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-                       sizeof timeout)) != 0) {
+  if ((rv = setsockopt(
+           this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout
+       )) != 0) {
     ESP_LOGE(TAG, "Failed to setsockopt (%s)", strerror(rv));
   }
 
@@ -61,9 +62,10 @@ Atem::Atem(const char *address) {
 #endif
 
   // Create background task
-  if (unlikely(!xTaskCreate([](void *a) { ((Atem *)a)->task_(); }, "atem",
-                            5 * 1024, this, configMAX_PRIORITIES - 1,
-                            &this->task_handle_))) {
+  if (unlikely(!xTaskCreate(
+          [](void *a) { ((Atem *)a)->task_(); }, "atem", 5 * 1024, this,
+          configMAX_PRIORITIES - 1, &this->task_handle_
+      ))) {
     ESP_LOGE(TAG, "Failed to create task");
     return;
   }
@@ -128,9 +130,10 @@ void Atem::task_() {
 
     int recv_len = packet.GetLength();
     if (recv_len > sizeof(buffer)) {
-      ESP_LOGE(TAG,
-               "Next package (len: %i) is larger than the buffer (len: %u)",
-               recv_len, sizeof(buffer));
+      ESP_LOGE(
+          TAG, "Next package (len: %i) is larger than the buffer (len: %u)",
+          recv_len, sizeof(buffer)
+      );
       recv_len = sizeof(buffer);
     }
 
@@ -144,21 +147,26 @@ void Atem::task_() {
 
     // Check Length
     if (packet.GetLength() != len) {
-      ESP_LOGW(TAG, "Received packet with invalid size (%u instead of %u)", len,
-               packet.GetLength());
+      ESP_LOGW(
+          TAG, "Received packet with invalid size (%u instead of %u)", len,
+          packet.GetLength()
+      );
       continue;
     }
 
-    ESP_LOGD(TAG, "<- Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
-             packet.GetFlags(), packet.GetAckId(), packet.GetResendId(),
-             packet.GetId(), packet.GetLength());
+    ESP_LOGD(
+        TAG, "<- Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
+        packet.GetFlags(), packet.GetAckId(), packet.GetResendId(),
+        packet.GetId(), packet.GetLength()
+    );
 
     // Check session id
     if (this->state_ == ConnectionState::kActive &&
         packet.GetSessionId() != this->session_id_) {
-      ESP_LOGW(TAG,
-               "Received packet with invalid session (%02x instead of %02x)",
-               packet.GetSessionId(), this->session_id_);
+      ESP_LOGW(
+          TAG, "Received packet with invalid session (%02x instead of %02x)",
+          packet.GetSessionId(), this->session_id_
+      );
       continue;
     }
 
@@ -174,9 +182,11 @@ void Atem::task_() {
         AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
         this->SendPacket_(&p);
       } else if (init_status == 0x3) {  // No connection available
-        ESP_LOGW(TAG,
-                 "Couldn't connect to the atem because it has no connection "
-                 "slot available");
+        ESP_LOGW(
+            TAG,
+            "Couldn't connect to the atem because it has no connection "
+            "slot available"
+        );
       } else {
         ESP_LOGW(TAG, "Received an unknown INIT status (%02x)", init_status);
       }
@@ -194,7 +204,8 @@ void Atem::task_() {
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++) {
         if (boot_events & (1 << i)) {
           ESP_ERROR_CHECK_WITHOUT_ABORT(
-              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0));
+              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0)
+          );
         }
       }
     }
@@ -208,7 +219,7 @@ void Atem::task_() {
 #if CONFIG_ATEM_STORE_SEND
       if (xSemaphoreTake(this->send_mutex_, 50 / portTICK_PERIOD_MS)) {
         int16_t id = packet.GetId();
-        for (int i = 0; AtemPacket * p : this->send_packets_) {
+        for (int i = 0; AtemPacket *p : this->send_packets_) {
           if (i++ > 50) break;  // Limit to max 50 loops
 
           if (p->GetId() == id) {
@@ -277,8 +288,10 @@ void Atem::task_() {
           // Remove all packets older than 32
           if ((((*it)->GetId() - id) & 0x7FFF) > 32 &&
               ((id - (*it)->GetId()) & 0x7FFF) > 32) {
-            ESP_LOGD(TAG, "Removing packet with id %i because it's to old",
-                     (*it)->GetId());
+            ESP_LOGD(
+                TAG, "Removing packet with id %i because it's to old",
+                (*it)->GetId()
+            );
             delete (*it);
             it = this->send_packets_.erase(it);
           } else if ((*it)->GetId() == id) {
@@ -310,9 +323,11 @@ void Atem::task_() {
 
     // Lock access to the state
     if (!xSemaphoreTake(this->state_mutex_, 150 / portTICK_PERIOD_MS)) {
-      ESP_LOGW(TAG,
-               "Failed to lock access to the state, make sure you only lock "
-               "the state for max 100ms.");
+      ESP_LOGW(
+          TAG,
+          "Failed to lock access to the state, make sure you only lock "
+          "the state for max 100ms."
+      );
       continue;
     }
 
@@ -354,8 +369,10 @@ void Atem::task_() {
         }
         case ATEM_CMD("_pin"): {  // Product Id
           event |= 1 << ATEM_EVENT_PRODUCT_ID;
-          memcpy(this->product_id_, command.GetData<char *>(),
-                 sizeof(this->product_id_));
+          memcpy(
+              this->product_id_, command.GetData<char *>(),
+              sizeof(this->product_id_)
+          );
 
           len = strlen(command.GetData<char *>());
           if (len > 44) len = 44;
@@ -395,8 +412,9 @@ void Atem::task_() {
           channel = command.GetData<uint8_t *>()[0];
           if (this->aux_out_.size() <= channel) break;
 
-          this->aux_out_[channel].Set(this->sqeuence_,
-                                      command.GetDataS<Source>(1));
+          this->aux_out_[channel].Set(
+              this->sqeuence_, command.GetDataS<Source>(1)
+          );
           break;
         }
         case ATEM_CMD("DskB"): {  // DSK Source
@@ -462,16 +480,18 @@ void Atem::task_() {
           // Copy name short
           len =
               strnlen(command.GetData<char *>() + 22, sizeof(inpr.name_short));
-          memcpy(inpr.name_short, command.GetData<uint8_t *>() + 22,
-                 sizeof(inpr.name_short));
+          memcpy(
+              inpr.name_short, command.GetData<uint8_t *>() + 22,
+              sizeof(inpr.name_short)
+          );
 
           // Store inpr
           auto it = input_properties_.find(source);
           if (it != this->input_properties_.end()) {
             (*it).second.Set(this->sqeuence_, inpr);
           } else {
-            input_properties_.insert(
-                {source, AtemState(this->sqeuence_, inpr)});
+            input_properties_.insert({source, AtemState(this->sqeuence_, inpr)}
+            );
           }
 
           break;
@@ -486,13 +506,19 @@ void Atem::task_() {
           if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
           const UskState state = {
-              .type = command.GetData<uint8_t *>()[2],
-              .fill = (Source)ntohs(command.GetData<uint16_t *>()[3]),
-              .key = (Source)ntohs(command.GetData<uint16_t *>()[4]),
-              .top = int16_t(ntohs(command.GetData<uint16_t *>()[6])),
-              .bottom = int16_t(ntohs(command.GetData<uint16_t *>()[7])),
-              .left = int16_t(ntohs(command.GetData<uint16_t *>()[8])),
-              .right = int16_t(ntohs(command.GetData<uint16_t *>()[9])),
+              .type = command.GetData<UskKeyerType>(2),  // 2
+
+              .flying_key_enabled = command.GetData<bool>(5),  // 5
+
+              .fill = command.GetDataS<Source>(3),  // 6-7
+              .key = command.GetDataS<Source>(4),   // 8-9
+
+              .mask_enabled = command.GetData<bool>(10),  // 10
+
+              .top = command.GetDataS<int16_t>(6),     // 12-13
+              .bottom = command.GetDataS<int16_t>(7),  // 14-15
+              .left = command.GetDataS<int16_t>(8),    // 16-17
+              .right = command.GetDataS<int16_t>(9),   // 18-19
           };
 
           this->mix_effect_[me].keyer[keyer].state.Set(this->sqeuence_, state);
@@ -508,18 +534,20 @@ void Atem::task_() {
           if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
           const DveState properties = {
-              .size_x = (int)ntohl(command.GetData<uint32_t *>()[1]),
-              .size_y = (int)ntohl(command.GetData<uint32_t *>()[2]),
-              .pos_x = (int)ntohl(command.GetData<uint32_t *>()[3]),
-              .pos_y = (int)ntohl(command.GetData<uint32_t *>()[4]),
-              .rotation = (int)ntohl(command.GetData<uint32_t *>()[5]),
+              .size_x = command.GetDataL<int>(1),
+              .size_y = command.GetDataL<int>(2),
+              .pos_x = command.GetDataL<int>(3),
+              .pos_y = command.GetDataL<int>(4),
+              .rotation = command.GetDataL<int>(5),
           };
-          this->mix_effect_[me].keyer[keyer].dve.Set(this->sqeuence_,
-                                                     properties);
+
+          this->mix_effect_[me].keyer[keyer].dve.Set(
+              this->sqeuence_, properties
+          );
           break;
         }
         case ATEM_CMD("KeFS"): {  // Usk Fly State
-          event |= 1 < ATEM_EVENT_USK;
+          event |= 1 < ATEM_EVENT_USK_DVE;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
@@ -528,7 +556,8 @@ void Atem::task_() {
           if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
           this->mix_effect_[me].keyer[keyer].at_key_frame.Set(
-              this->sqeuence_, command.GetData<uint8_t *>()[6]);
+              this->sqeuence_, command.GetData<uint8_t *>()[6]
+          );
           break;
         }
         case ATEM_CMD("KeOn"): {  // Key on Air
@@ -570,13 +599,16 @@ void Atem::task_() {
           if (type != 0) break;  // Only work with stills
           event |= 1 << ATEM_EVENT_MEDIA_POOL;
 
-          const std::string name =
-              is_used ? std::string(command.GetData<char *>() + 24,
-                                    command.GetData<uint8_t *>()[23])
-                      : std::string();
+          const std::string name = is_used
+                                       ? std::string(
+                                             command.GetData<char *>() + 24,
+                                             command.GetData<uint8_t *>()[23]
+                                         )
+                                       : std::string();
 
           this->media_player_file_.insert_or_assign(
-              index, AtemState(this->sqeuence_, std::move(name)));
+              index, AtemState(this->sqeuence_, std::move(name))
+          );
           break;
         }
         case ATEM_CMD("PrgI"): {  // Program Input
@@ -584,8 +616,9 @@ void Atem::task_() {
           me = command.GetData<uint8_t *>()[0];
 
           if (this->mix_effect_.size() <= me) break;
-          this->mix_effect_[me].program.Set(this->sqeuence_,
-                                            command.GetDataS<Source>(1));
+          this->mix_effect_[me].program.Set(
+              this->sqeuence_, command.GetDataS<Source>(1)
+          );
           break;
         }
         case ATEM_CMD("PrvI"): {  // Preview Input
@@ -593,15 +626,17 @@ void Atem::task_() {
           me = command.GetData<uint8_t *>()[0];
 
           if (this->mix_effect_.size() <= me) break;
-          this->mix_effect_[me].preview.Set(this->sqeuence_,
-                                            command.GetDataS<Source>(1));
+          this->mix_effect_[me].preview.Set(
+              this->sqeuence_, command.GetDataS<Source>(1)
+          );
           break;
         }
         case ATEM_CMD("StRS"): {  // Stream Status
           if (command.GetLength() != 12) continue;
           event |= 1 << ATEM_EVENT_STREAM;
-          this->stream_.Set(this->sqeuence_,
-                            (StreamState)(command.GetData<uint8_t *>()[1]));
+          this->stream_.Set(
+              this->sqeuence_, (StreamState)(command.GetData<uint8_t *>()[1])
+          );
           break;
         }
         case ATEM_CMD("TrPs"): {  // Transition Position
@@ -614,8 +649,9 @@ void Atem::task_() {
               .in_transition = (bool)(command.GetData(1) & 0x01),
               .position = command.GetDataS<uint16_t>(2),
           };
-          this->mix_effect_[me].transition.position.Set(this->sqeuence_,
-                                                        position);
+          this->mix_effect_[me].transition.position.Set(
+              this->sqeuence_, position
+          );
           break;
         }
         case ATEM_CMD("TrSS"): {  // Transition State
@@ -643,7 +679,8 @@ void Atem::task_() {
       for (int32_t i = 0; i < sizeof(event) * 8; i++)
         if (event & (1 << i))
           ESP_ERROR_CHECK_WITHOUT_ABORT(
-              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0));
+              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0)
+          );
     } else {
       boot_events |= event;
     }
@@ -718,12 +755,15 @@ esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
 // MARK: Private functions
 
 esp_err_t Atem::SendPacket_(AtemPacket *packet) {
-  ESP_LOG_BUFFER_HEXDUMP(TAG, packet->GetData(), packet->GetLength(),
-                         ESP_LOG_VERBOSE);
+  ESP_LOG_BUFFER_HEXDUMP(
+      TAG, packet->GetData(), packet->GetLength(), ESP_LOG_VERBOSE
+  );
 
-  ESP_LOGD(TAG, "-> Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
-           packet->GetFlags(), packet->GetAckId(), packet->GetResendId(),
-           packet->GetId(), packet->GetLength());
+  ESP_LOGD(
+      TAG, "-> Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
+      packet->GetFlags(), packet->GetAckId(), packet->GetResendId(),
+      packet->GetId(), packet->GetLength()
+  );
 
   int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
   if (len != packet->GetLength()) {
@@ -772,7 +812,8 @@ void Atem::Reconnect_() {
   if (was_connected) {
     uint16_t packet_id = 0;
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_post(
-        ATEM_EVENT, ATEM_EVENT_PRODUCT_ID, &packet_id, sizeof(packet_id), 0));
+        ATEM_EVENT, ATEM_EVENT_PRODUCT_ID, &packet_id, sizeof(packet_id), 0
+    ));
   }
 
   // Send init request

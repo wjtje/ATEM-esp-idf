@@ -53,11 +53,11 @@ enum : int32_t {
    */
   ATEM_EVENT_INPUT_PROPERTIES,
   /**
-   * @brief KeBP / KeFS / KeOn
+   * @brief KeBP / KeOn
    */
   ATEM_EVENT_USK,
   /**
-   * @brief KeDV
+   * @brief KeDV / KeFS
    */
   ATEM_EVENT_USK_DVE,
   /**
@@ -135,8 +135,8 @@ class Atem {
   const std::vector<MixEffect>& GetMixEffect() const {
     return this->mix_effect_;
   }
-  const std::vector<AtemState<MediaPlayerSource>>& GetMediaPlayerSources()
-      const {
+  const std::vector<AtemState<MediaPlayerSource>>& GetMediaPlayerSources(
+  ) const {
     return this->media_player_source_;
   }
 
@@ -159,8 +159,8 @@ class Atem {
    *
    * @return const std::map<uint16_t, char*> {index, file name}
    */
-  const std::map<uint16_t, AtemState<std::string>>& GetMediaPlayerFileName()
-      const {
+  const std::map<uint16_t, AtemState<std::string>>& GetMediaPlayerFileName(
+  ) const {
     return this->media_player_file_;
   }
 
@@ -243,8 +243,9 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayerSource(MediaPlayerSource& state,
-                            uint8_t mediaplayer) const;
+  bool GetMediaPlayerSource(
+      MediaPlayerSource& state, uint8_t mediaplayer
+  ) const;
 
   /**
    * @brief Get the current preview source active on ME

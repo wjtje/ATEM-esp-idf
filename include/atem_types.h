@@ -184,10 +184,22 @@ struct MediaPlayerSource {
   uint8_t clip_index;
 };
 
+enum class UskKeyerType : uint8_t {
+  LUMA = 0,
+  CHROMA = 1,
+  PATTERN = 2,
+  DVE = 3,
+};
+
 struct UskState {
-  uint8_t type;
+  UskKeyerType type;
+
+  bool flying_key_enabled;
+
   Source fill;
   Source key;
+
+  bool mask_enabled;
   int16_t top;
   int16_t bottom;
   int16_t left;
@@ -196,7 +208,15 @@ struct UskState {
 
 struct Usk {
   AtemState<UskState> state;
-  AtemState<bool> at_key_frame;
+  /**
+   * @brief At which keyframe the DVE is currently
+   * 0 - No keyframe
+   * 1 - A
+   * 2 - B
+   * 4 - Full
+   * 8 - Run-to-inf
+   */
+  AtemState<uint8_t> at_key_frame;
   AtemState<DveState> dve;
 };
 
