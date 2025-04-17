@@ -2,21 +2,24 @@
 
 #ifdef CONFIG_ATEM_DEBUG_MUTEX_CHECK
 static const char* TAG{"AtemState"};
-#define ATEM_MUTEX_OWER_CHECK()                                        \
-  if (xQueuePeek(this->state_mutex_, NULL, 0) == pdTRUE) {             \
-    char* task_name = pcTaskGetName(NULL);                             \
-    ESP_LOGE(TAG, "Task '%s' doesn't have the mutex while calling %s", \
-             task_name, __ASSERT_FUNC);                                \
-    return false;                                                      \
+#define ATEM_MUTEX_OWER_CHECK()                                              \
+  if (xQueuePeek(this->state_mutex_, NULL, 0) == pdTRUE) {                   \
+    char* task_name = pcTaskGetName(NULL);                                   \
+    ESP_LOGE(                                                                \
+        TAG, "Task '%s' doesn't have the mutex while calling %s", task_name, \
+        __ASSERT_FUNC                                                        \
+    );                                                                       \
+    return false;                                                            \
   }
 #else
 #define ATEM_MUTEX_OWER_CHECK() \
-  {}
+  {                             \
+  }
 #endif
 
 namespace atem {
 
-bool Atem::GetAuxOutput(Source& source, uint8_t channel) const {
+bool Atem::GetAuxOutput(uint8_t channel, Source& source) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->aux_out_.size() <= channel) return false;
   if (!this->aux_out_[channel].IsValid()) return false;
@@ -24,7 +27,7 @@ bool Atem::GetAuxOutput(Source& source, uint8_t channel) const {
   return true;
 }
 
-bool Atem::GetDskState(DskState& state, uint8_t keyer) const {
+bool Atem::GetDskState(uint8_t keyer, DskState& state) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->dsk_.size() <= keyer) return false;
   if (!this->dsk_[keyer].state.IsValid()) return false;
@@ -32,7 +35,7 @@ bool Atem::GetDskState(DskState& state, uint8_t keyer) const {
   return true;
 }
 
-bool Atem::GetDskSource(DskSource& source, uint8_t keyer) const {
+bool Atem::GetDskSource(uint8_t keyer, DskSource& source) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->dsk_.size() <= keyer) return false;
   if (!this->dsk_[keyer].source.IsValid()) return false;
@@ -40,7 +43,7 @@ bool Atem::GetDskSource(DskSource& source, uint8_t keyer) const {
   return true;
 }
 
-bool Atem::GetDskProperties(DskProperties& properties, uint8_t keyer) const {
+bool Atem::GetDskProperties(uint8_t keyer, DskProperties& properties) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->dsk_.size() <= keyer) return false;
   if (!this->dsk_[keyer].properties.IsValid()) return false;
@@ -48,7 +51,7 @@ bool Atem::GetDskProperties(DskProperties& properties, uint8_t keyer) const {
   return true;
 }
 
-bool Atem::GetFtbState(FadeToBlack& state, uint8_t me) const {
+bool Atem::GetFtbState(uint8_t me, FadeToBlack& state) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
   if (!this->mix_effect_[me].ftb.IsValid()) return false;
@@ -70,8 +73,9 @@ bool Atem::GetMediaPlayer(MediaPlayer& media_player) const {
   return true;
 }
 
-bool Atem::GetMediaPlayerSource(MediaPlayerSource& state,
-                                uint8_t mediaplayer) const {
+bool Atem::GetMediaPlayerSource(
+    uint8_t mediaplayer, MediaPlayerSource& state
+) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->media_player_source_.size() <= mediaplayer) return false;
   if (!this->media_player_source_[mediaplayer].IsValid()) return false;
@@ -79,7 +83,7 @@ bool Atem::GetMediaPlayerSource(MediaPlayerSource& state,
   return true;
 }
 
-bool Atem::GetPreviewInput(Source& source, uint8_t me) const {
+bool Atem::GetPreviewInput(uint8_t me, Source& source) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
   if (!this->mix_effect_[me].preview.IsValid()) return false;
@@ -87,7 +91,7 @@ bool Atem::GetPreviewInput(Source& source, uint8_t me) const {
   return true;
 }
 
-bool Atem::GetProgramInput(Source& source, uint8_t me) const {
+bool Atem::GetProgramInput(uint8_t me, Source& source) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
   if (!this->mix_effect_[me].program.IsValid()) return false;
@@ -109,7 +113,7 @@ bool Atem::GetTopology(Topology& topology) const {
   return true;
 }
 
-bool Atem::GetTransitionState(TransitionState& state, uint8_t me) const {
+bool Atem::GetTransitionState(uint8_t me, TransitionState& state) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
   if (!this->mix_effect_[me].transition.state.IsValid()) return false;
@@ -117,8 +121,9 @@ bool Atem::GetTransitionState(TransitionState& state, uint8_t me) const {
   return true;
 }
 
-bool Atem::GetTransitionPosition(TransitionPosition& position,
-                                 uint8_t me) const {
+bool Atem::GetTransitionPosition(
+    uint8_t me, TransitionPosition& position
+) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
   if (!this->mix_effect_[me].transition.position.IsValid()) return false;
@@ -126,7 +131,7 @@ bool Atem::GetTransitionPosition(TransitionPosition& position,
   return true;
 }
 
-bool Atem::GetUskState(UskState& state, uint8_t me, uint8_t keyer) const {
+bool Atem::GetUskState(uint8_t me, uint8_t keyer, UskState& state) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
   if (this->mix_effect_[me].keyer.size() <= keyer) return false;
@@ -135,14 +140,14 @@ bool Atem::GetUskState(UskState& state, uint8_t me, uint8_t keyer) const {
   return true;
 }
 
-bool Atem::GetUskNumber(uint8_t& number, uint8_t me) const {
+bool Atem::GetUskNumber(uint8_t me, uint8_t& count) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
-  number = this->mix_effect_[me].keyer.size();
+  count = this->mix_effect_[me].keyer.size();
   return true;
 }
 
-bool Atem::GetUskOnAir(bool& state, uint8_t me, uint8_t keyer) const {
+bool Atem::GetUskOnAir(uint8_t me, uint8_t keyer, bool& state) const {
   ATEM_MUTEX_OWER_CHECK();
 
   if (this->mix_effect_.size() <= me || keyer > 15) return false;
@@ -152,7 +157,7 @@ bool Atem::GetUskOnAir(bool& state, uint8_t me, uint8_t keyer) const {
   return true;
 }
 
-bool Atem::GetUskDveState(DveState& state, uint8_t me, uint8_t keyer) const {
+bool Atem::GetUskDveState(uint8_t me, uint8_t keyer, DveState& state) const {
   ATEM_MUTEX_OWER_CHECK();
   if (this->mix_effect_.size() <= me) return false;
   if (this->mix_effect_[me].keyer.size() <= keyer) return false;

@@ -177,48 +177,48 @@ class Atem {
    * @brief Get the source that's currently displayed of the aux channel. It
    * will return false when it's invalid.
    *
-   * @param source[out] A variable that the source will be stored in
-   * @param channel[in] Which aux channel to use
+   * @param [in] channel Which aux channel to use
+   * @param [out] source A variable that the source will be stored in
    *
    * @return Weather or not the variable is valid
    */
-  bool GetAuxOutput(Source& source, uint8_t channel) const;
+  bool GetAuxOutput(uint8_t channel, Source& source) const;
   /**
    * @brief Get the state of a DSK
    *
-   * @param state[out] A variable that the state will be stored in
-   * @param keyer[in] Which keyer to use
+   * @param [in] keyer Which keyer to use
+   * @param [out] state A variable that the state will be stored in
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskState(DskState& state, uint8_t keyer) const;
+  bool GetDskState(uint8_t keyer, DskState& state) const;
   /**
    * @brief Get the current fill and key source of a DSK
    *
-   * @param source[out] A variable that the state will be stored in
-   * @param keyer[in] Which keyer to use
+   * @param [in] keyer Which keyer to use
+   * @param [out] source A variable that the state will be stored in
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskSource(DskSource& source, uint8_t keyer) const;
+  bool GetDskSource(uint8_t keyer, DskSource& source) const;
   /**
    * @brief Get the properties of a DSK
    *
-   * @param properties[out] A variable that the state will be stored in
-   * @param keyer[in] Which keyer to use
+   * @param [in] keyer Which keyer to use
+   * @param [out] properties A variable that the state will be stored in
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskProperties(DskProperties& properties, uint8_t keyer) const;
+  bool GetDskProperties(uint8_t keyer, DskProperties& properties) const;
   /**
    * @brief Get the state of the Fade to black on a specific MixEffect.
    *
-   * @param state[out] A variable that the state will be stored in
-   * @param me[in] Which MixEffect to use
+   * @param [in] me Which MixEffect to use
+   * @param [out] state A variable that the state will be stored in
    *
    * @return Weather or not the variable is valid
    */
-  bool GetFtbState(FadeToBlack& state, uint8_t me) const;
+  bool GetFtbState(uint8_t me, FadeToBlack& state) const;
   /**
    * @brief Get information about the current stream state.
    *
@@ -238,24 +238,24 @@ class Atem {
   /**
    * @brief Get the access to the active source on a specific mediaplayer
    *
-   * @param state[out] A variable that will hold the current state
-   * @param mediaplayer[in] The media player to get the state from
+   * @param [in] mediaplayer The media player to get the state from
+   * @param [out] state A variable that will hold the current state
    *
    * @return Weather or not the variable is valid
    */
   bool GetMediaPlayerSource(
-      MediaPlayerSource& state, uint8_t mediaplayer
+      uint8_t mediaplayer, MediaPlayerSource& state
   ) const;
 
   /**
    * @brief Get the current preview source active on ME
    *
-   * @param source[out] A variable that the source will be stored in
-   * @param me[in] Which ME to use
+   * @param [out] source A variable that the source will be stored in
+   * @param [in] me Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetPreviewInput(Source& source, uint8_t me) const;
+  bool GetPreviewInput(uint8_t me, Source& source) const;
   /**
    * @brief Get the Product Id (model) of the connected atem.
    *
@@ -265,12 +265,10 @@ class Atem {
   /**
    * @brief Get the current program source active on ME
    *
-   * @param source[out] A variable that the source will be stored in
-   * @param me[in] Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProgramInput(Source& source, uint8_t me) const;
+  bool GetProgramInput(uint8_t me, Source& source) const;
   /**
    * @brief Get the Protocol Version
    *
@@ -290,60 +288,60 @@ class Atem {
   /**
    * @brief Get the information about the current transition state on a ME
    *
-   * @param state[out] A variable that will store the current state
-   * @param me[in] Which ME to use
+   * @param [out] state A variable that will store the current state
+   * @param [in] me Which ME to use
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionState(TransitionState& state, uint8_t me) const;
+  bool GetTransitionState(uint8_t me, TransitionState& state) const;
   /**
    * @brief Get the information about the current transition position on a ME
    *
-   * @position state[out] A variable that will store the current state
-   * @param me[in] Which ME to use
+   * @param [in] me Which ME to use
+   * @param [out] position A variable that will store the current state
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionPosition(TransitionPosition& position, uint8_t me) const;
+  bool GetTransitionPosition(uint8_t me, TransitionPosition& position) const;
   /**
    * @brief Get the Usk state
    *
-   * @param state[out] A variable that will store the current state
-   * @param me[in] Which MixEffect to use
-   * @param keyer[in] Which keyer to use
+   * @param [in] me Which MixEffect to use
+   * @param [in] keyer Which keyer to use
+   * @param [out] state A variable that will store the current state
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskState(UskState& state, uint8_t me, uint8_t keyer) const;
+  bool GetUskState(uint8_t me, uint8_t keyer, UskState& state) const;
   /**
    * @brief Get the number of Usk on a given ME
    *
-   * @param number[out] A variable that will store the result
-   * @param me[in] Which ME to use
+   * @param [in] me Which ME to use
+   * @param [out] count A variable that will store the result
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskNumber(uint8_t& number, uint8_t me) const;
+  bool GetUskNumber(uint8_t me, uint8_t& count) const;
   /**
    * @brief Get is a USK is on air
    *
-   * @param state[out] A variable that will store the current state
-   * @param me[in] Which MixEffect to use
-   * @param keyer[in] Which keyer to use
+   * @param [in] me Which MixEffect to use
+   * @param [in] keyer Which keyer to use
+   * @param [out] state A variable that will store the current state
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskOnAir(bool& state, uint8_t me, uint8_t keyer) const;
+  bool GetUskOnAir(uint8_t me, uint8_t keyer, bool& state) const;
   /**
    * @brief Get the Usk Dve state
    *
-   * @param state[out] A variable that will store the current state
-   * @param me[in] Which MixEffect to use
-   * @param keyer[in] Which keyer to use
+   * @param [in] me Which MixEffect to use
+   * @param [in] keyer Which keyer to use
+   * @param [out] state A variable that will store the current state
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskDveState(DveState& state, uint8_t me, uint8_t keyer) const;
+  bool GetUskDveState(uint8_t me, uint8_t keyer, DveState& state) const;
 
   /**
    * @brief Send a list of commands to the ATEM, memory is automaticaly

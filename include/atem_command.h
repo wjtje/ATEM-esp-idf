@@ -130,7 +130,7 @@ class Auto : public AtemCommand {
   /**
    * @brief Perform an AUTO transition on a MixEffect
    *
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
    */
   Auto(uint8_t me) : AtemCommand("DAut", 12) { GetData<uint8_t *>()[0] = me; }
 };
@@ -140,10 +140,10 @@ class AuxInput : public AtemCommand {
   /**
    * @brief Change the source on a specific AUX channel
    *
-   * @param source[in] The new source for the AUX channel
-   * @param channel[in] Which AUX channel to change
+   * @param [in] channel Which AUX channel to change
+   * @param [in] source The new source for the AUX channel
    */
-  AuxInput(Source source, uint8_t channel) : AtemCommand("CAuS", 12) {
+  AuxInput(uint8_t channel, Source source) : AtemCommand("CAuS", 12) {
     GetData<uint8_t *>()[0] = 1;
     GetData<uint8_t *>()[1] = channel;
     GetData<uint16_t *>()[1] = htons(source);
@@ -160,7 +160,7 @@ class Cut : public AtemCommand {
   /**
    * @brief Perform a CUT transition on a MixEffect
    *
-   * @param me[in] Which MixEffect to perform the action on
+   * @param [in] me Which MixEffect to perform the action on
    */
   Cut(uint8_t me) : AtemCommand("DCut", 12) { GetData<uint8_t *>()[0] = me; }
 };
@@ -170,7 +170,7 @@ class DskAuto : public AtemCommand {
   /**
    * @brief Perform a AUTO transition on a Downstream Keyer
    *
-   * @param keyer[in] Which keyer to perform the action on
+   * @param [in] keyer Which keyer to perform the action on
    */
   DskAuto(uint8_t keyer) : AtemCommand("DDsA", 12), keyer_(keyer) {}
   void PrepairCommand(const ProtocolVersion &ver) override {
@@ -190,10 +190,10 @@ class DskOnAir : public AtemCommand {
   /**
    * @brief Change the on air state of a Downstream Keyer
    *
-   * @param state[in] The new stata
-   * @param keyer[in] Which keyer to perform the action on
+   * @param [in] keyer Which keyer to perform the action on
+   * @param [in] state The new stata
    */
-  DskOnAir(bool state, uint8_t keyer) : AtemCommand("CDsL", 12) {
+  DskOnAir(uint8_t keyer, bool state) : AtemCommand("CDsL", 12) {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint8_t *>()[1] = state;
   }
@@ -204,10 +204,10 @@ class DskFill : public AtemCommand {
   /**
    * @brief Change the fill source on a Downstream Keyer
    *
-   * @param source[in] The new source
-   * @param keyer[in] Which keyer to perform the action on
+   * @param [in] keyer Which keyer to perform the action on
+   * @param [in] source The new source
    */
-  DskFill(Source source, uint8_t keyer) : AtemCommand("CDsF", 12) {
+  DskFill(uint8_t keyer, Source source) : AtemCommand("CDsF", 12) {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
   }
@@ -218,10 +218,10 @@ class DskKey : public AtemCommand {
   /**
    * @brief Change the key source on a Downstream Keye
    *
-   * @param source[in] The new source
-   * @param keyer[in] Which keyer to perform the action on
+   * @param [in] source The new source
+   * @param [in] keyer Which keyer to perform the action on
    */
-  DskKey(Source source, uint8_t keyer) : AtemCommand("CDsC", 12) {
+  DskKey(uint8_t keyer, Source source) : AtemCommand("CDsC", 12) {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
   }
@@ -232,10 +232,10 @@ class DskTie : public AtemCommand {
   /**
    * @brief Change the tie state of a Downstream Keyer
    *
-   * @param state[in] The new state
-   * @param keyer[in] Which keyer to perform the action on
+   * @param [in] state The new state
+   * @param [in] keyer Which keyer to perform the action on
    */
-  DskTie(bool state, uint8_t keyer) : AtemCommand("CDsT", 12) {
+  DskTie(uint8_t keyer, bool state) : AtemCommand("CDsT", 12) {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint8_t *>()[1] = state;
   }
@@ -246,7 +246,7 @@ class FadeToBlack : public AtemCommand {
   /**
    * @brief Perform a Fade to Black action on a specific MixEffect
    *
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
    */
   FadeToBlack(uint8_t me) : AtemCommand("FtbA", 12) {
     GetData<uint8_t *>()[0] = me;
@@ -259,21 +259,34 @@ class MediaPlayerSource : public AtemCommand {
    * @brief Change the source of a mediaplayer
    *
    * @param [in] mediaplayer Which media player to change
-   * @param [in] mask Which fields are valid (3 for type and still)
    * @param [in|optional] type Which type the media player is in (1 for still)
    * @param [in|optional] still The new still source
    * @param [in|optional] clip The new clip source
    */
   MediaPlayerSource(
-      uint8_t mediaplayer, uint8_t mask, uint8_t type, uint8_t still,
-      uint8_t clip
+      uint8_t mediaplayer, std::optional<uint8_t> type,
+      std::optional<uint8_t> still, std::optional<uint8_t> clip
   )
       : AtemCommand("MPSS", 16) {
+    uint8_t mask = 0;
+
+    if (type.has_value()) {
+      mask |= 1 << 0;
+      GetData<uint8_t *>()[2] = type.value();
+    }
+
+    if (still.has_value()) {
+      mask |= 1 << 1;
+      GetData<uint8_t *>()[3] = still.value();
+    }
+
+    if (clip.has_value()) {
+      mask |= 1 << 2;
+      GetData<uint8_t *>()[4] = clip.value();
+    }
+
     GetData<uint8_t *>()[0] = mask;
     GetData<uint8_t *>()[1] = mediaplayer;
-    GetData<uint8_t *>()[2] = type;
-    GetData<uint8_t *>()[3] = still;
-    GetData<uint8_t *>()[4] = clip;
   }
 };
 
@@ -452,10 +465,10 @@ class PreviewInput : public AtemCommand {
   /**
    * @brief Change the preview source on a MixEffect
    *
-   * @param source[in] The new preview source
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] source The new preview source
    */
-  PreviewInput(Source source, uint8_t me) : AtemCommand("CPvI", 12) {
+  PreviewInput(uint8_t me, Source source) : AtemCommand("CPvI", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(source);
   }
@@ -466,10 +479,10 @@ class ProgramInput : public AtemCommand {
   /**
    * @brief Change the program source on a MixEffect
    *
-   * @param source[in] The new program source
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] source The new program source
    */
-  ProgramInput(Source source, uint8_t me) : AtemCommand("CPgI", 12) {
+  ProgramInput(uint8_t me, Source source) : AtemCommand("CPgI", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(source);
   }
@@ -500,10 +513,10 @@ class TransitionPosition : public AtemCommand {
   /**
    * @brief Change the AUTO transition position
    *
-   * @param position[in] The new position (between 0 and 10000)
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] position The new position (between 0 and 10000)
    */
-  TransitionPosition(uint16_t position, uint8_t me) : AtemCommand("CTPs", 12) {
+  TransitionPosition(uint8_t me, uint16_t position) : AtemCommand("CTPs", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(position);
   }
@@ -514,12 +527,13 @@ class TransitionState : public AtemCommand {
   /**
    * @brief The transition state of the MixEffect
    *
-   * @param next[in] A bitmask of the Keyers active
-   * @param me[in] Which MixEffect to perform this action on
+   * @param [in] me Which MixEffect to perform this action on
+   * @param [in] style Which style of transition is used
+   * @param [in] next A bitmask of the Keyers active
    */
   TransitionState(
-      std::optional<TransitionStyle> style, std::optional<uint8_t> next,
-      uint8_t me
+      uint8_t me, std::optional<TransitionStyle> style,
+      std::optional<uint8_t> next
   )
       : AtemCommand("CTTp", 12) {
     GetData<uint8_t *>()[0] =
