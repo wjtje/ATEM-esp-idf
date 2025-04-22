@@ -360,7 +360,7 @@ class UskDveProperties : public AtemCommand {
   template <template <class...> class Container, class... Args>
   UskDveProperties(
       uint8_t me, uint8_t keyer,
-      Container<std::pair<UskDveProperty, int>, Args...> &p
+      const Container<std::pair<UskDveProperty, int>, Args...> &p
   )
       : AtemCommand("CKDV", 72) {
     uint32_t mask = 0;
