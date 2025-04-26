@@ -168,6 +168,11 @@ struct DveState {
 
 enum class UskDveProperty { SIZE_X, SIZE_Y, POS_X, POS_Y, ROTATION };
 
+struct DveProperty {
+  UskDveProperty property;
+  int value;
+};
+
 struct ProtocolVersion {
   uint16_t major;
   uint16_t minor;

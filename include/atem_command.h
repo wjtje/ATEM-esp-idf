@@ -305,15 +305,14 @@ class UskDveKeyFrameProperties : public AtemCommand {
   template <template <class...> class Container, class... Args>
   UskDveKeyFrameProperties(
       uint8_t me, uint8_t keyer, UskDveKeyFrame key_frame,
-      Container<std::pair<UskDveProperty, int>, Args...> &p
+      Container<DveProperty, Args...> &p
   )
       : AtemCommand("CKFP", 64) {
     uint32_t mask = 0;
 
     for (auto c : p) {
-      const auto &[property, value] = c;
-      mask |= 1 << (uint8_t)property;
-      ((uint32_t *)this->data_)[4 + (uint8_t)property] = htonl(value);
+      mask |= 1 << (uint8_t)c.property;
+      ((uint32_t *)this->data_)[4 + (uint8_t)c.property] = htonl(c.value);
     }
 
     GetData<uint32_t *>()[0] = htonl(mask);
@@ -359,16 +358,14 @@ class UskDveProperties : public AtemCommand {
    */
   template <template <class...> class Container, class... Args>
   UskDveProperties(
-      uint8_t me, uint8_t keyer,
-      const Container<std::pair<UskDveProperty, int>, Args...> &p
+      uint8_t me, uint8_t keyer, const Container<DveProperty, Args...> &p
   )
       : AtemCommand("CKDV", 72) {
     uint32_t mask = 0;
 
     for (auto c : p) {
-      const auto &[property, value] = c;
-      mask |= 1 << (uint8_t)property;
-      ((uint32_t *)this->data_)[4 + (uint8_t)property] = htonl(value);
+      mask |= 1 << (uint8_t)c.property;
+      ((uint32_t *)this->data_)[4 + (uint8_t)c.property] = htonl(c.value);
     }
 
     GetData<uint32_t *>()[0] = htonl(mask);
