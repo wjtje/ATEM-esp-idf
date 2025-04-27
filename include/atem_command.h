@@ -305,7 +305,7 @@ class UskDveKeyFrameProperties : public AtemCommand {
   template <template <class...> class Container, class... Args>
   UskDveKeyFrameProperties(
       uint8_t me, uint8_t keyer, UskDveKeyFrame key_frame,
-      Container<DveProperty, Args...> &p
+      const Container<DveProperty, Args...> &p
   )
       : AtemCommand("CKFP", 64) {
     uint32_t mask = 0;
