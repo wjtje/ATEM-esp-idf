@@ -13,6 +13,7 @@
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
 
+#include <array>
 #include <cmath>
 #include <map>
 #include <string>
@@ -118,6 +119,14 @@ class Atem {
    */
   SemaphoreHandle_t GetStateMutex() const { return this->state_mutex_; }
 
+  /**
+   * @brief Returns approximately the amount of bytes used by all the internal
+   * structures of this object.
+   *
+   * @return size_t
+   */
+  size_t GetSize() const;
+
   // MARK: Direct state
 
   /**
@@ -159,8 +168,7 @@ class Atem {
    *
    * @return const std::map<uint16_t, char*> {index, file name}
    */
-  const std::map<uint16_t, AtemState<std::string>>& GetMediaPlayerFileName(
-  ) const {
+  const auto& GetMediaPlayerFileName() const {
     return this->media_player_file_;
   }
 
@@ -394,7 +402,7 @@ class Atem {
   std::vector<Dsk> dsk_;
   std::vector<AtemState<Source>> aux_out_;
   std::vector<AtemState<MediaPlayerSource>> media_player_source_;
-  std::map<uint16_t, AtemState<std::string>> media_player_file_;
+  std::vector<AtemState<std::string>> media_player_file_;
   AtemState<StreamState> stream_{StreamState::IDLE};
 
   TaskHandle_t task_handle_{nullptr};
@@ -406,7 +414,7 @@ class Atem {
    *
    * @param packet
    */
-  esp_err_t SendPacket_(AtemPacket* packet);
+  esp_err_t SendPacket_(const AtemPacket* packet);
   /**
    * @brief Close current connection, Reset variables, and send INIT request.
    */

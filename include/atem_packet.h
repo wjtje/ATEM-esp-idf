@@ -29,6 +29,7 @@ class AtemPacket {
    * @return void*
    */
   void* GetData() { return this->data_; }
+  const void* GetData() const { return this->data_; }
   /**
    * @brief Get the flags of the packet. e.g. What kind of data this packet
    * contains.
@@ -41,35 +42,35 @@ class AtemPacket {
    *
    * @return uint8_t
    */
-  uint8_t GetFlags() { return ((uint8_t*)this->data_)[0] >> 3; }
+  uint8_t GetFlags() const { return ((uint8_t*)this->data_)[0] >> 3; }
   /**
    * @brief Get the length of the packet, this includes the length of all
    * headers
    *
    * @return uint16_t
    */
-  uint16_t GetLength() { return ntohs(*(uint16_t*)this->data_) & 0x07FF; }
+  uint16_t GetLength() const { return ntohs(*(uint16_t*)this->data_) & 0x07FF; }
   /**
    * @brief Get the uniqe ID for this session with the ATEM.
    *
    * @return uint16_t
    */
-  uint16_t GetSessionId() { return ntohs(((uint16_t*)this->data_)[1]); }
+  uint16_t GetSessionId() const { return ntohs(((uint16_t*)this->data_)[1]); }
   /**
    * @brief Get the id of the packet that has been ACKed. This is only valid
    * when this->GetFlags() & 0x10.
    *
    * @return int16_t
    */
-  int16_t GetAckId() { return ntohs(((int16_t*)this->data_)[2]); }
+  int16_t GetAckId() const { return ntohs(((int16_t*)this->data_)[2]); }
   /**
    * @brief Get the id of the packet that needs to be resend. This is only
    * valid when this->GetFlags() & 0x8.
    *
    * @return int16_t
    */
-  int16_t GetResendId() { return ntohs(((int16_t*)this->data_)[3]); }
-  int16_t GetId() { return ntohs(((int16_t*)this->data_)[5]); }
+  int16_t GetResendId() const { return ntohs(((int16_t*)this->data_)[3]); }
+  int16_t GetId() const { return ntohs(((int16_t*)this->data_)[5]); }
 
   void SetFlags(uint8_t flags) {
     const uint8_t byte = ((uint8_t*)this->data_)[0];

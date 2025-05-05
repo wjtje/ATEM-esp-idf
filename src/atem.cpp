@@ -87,6 +87,29 @@ Atem::~Atem() {
 #endif
 }
 
+size_t Atem::GetSize() const {
+  size_t size = sizeof(*this);
+  size += input_properties_.size() *
+          sizeof(decltype(input_properties_)::value_type);
+
+  for (const auto &me : mix_effect_) {
+    size += sizeof(me);
+    size += me.keyer.size() * sizeof(decltype(me.keyer)::value_type);
+  }
+
+  size += dsk_.size() * sizeof(decltype(dsk_)::value_type);
+  size += aux_out_.size() * sizeof(decltype(aux_out_)::value_type);
+  size += media_player_source_.size() *
+          sizeof(decltype(media_player_source_)::value_type);
+
+  for (const auto &mf : media_player_file_) {
+    size += sizeof(mf);
+    size += mf.Get().size() + 1;
+  }
+
+  return size;
+}
+
 // MARK: Background task
 
 void Atem::task_() {
@@ -606,9 +629,15 @@ void Atem::task_() {
                                          )
                                        : std::string();
 
-          this->media_player_file_.insert_or_assign(
-              index, AtemState(this->sqeuence_, std::move(name))
-          );
+          // Check if vector is large enhough
+          if (this->media_player_file_.size() <= index) {
+            this->media_player_file_.resize(
+                index + 1, AtemState<std::string>()
+            );
+          }
+
+          this->media_player_file_.at(index) =
+              AtemState(this->sqeuence_, std::move(name));
           break;
         }
         case ATEM_CMD("PrgI"): {  // Program Input
@@ -754,7 +783,7 @@ esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
 
 // MARK: Private functions
 
-esp_err_t Atem::SendPacket_(AtemPacket *packet) {
+esp_err_t Atem::SendPacket_(const AtemPacket *packet) {
   ESP_LOG_BUFFER_HEXDUMP(
       TAG, packet->GetData(), packet->GetLength(), ESP_LOG_VERBOSE
   );
