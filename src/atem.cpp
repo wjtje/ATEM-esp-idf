@@ -31,6 +31,9 @@ Atem::Atem(const char *address) {
       continue;
     }
 
+    // We only allow IPv4, so this is fine
+    address_.addr =
+        reinterpret_cast<sockaddr_in *>(p->ai_addr)->sin_addr.s_addr;
     break;
   }
 

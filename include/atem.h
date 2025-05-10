@@ -109,6 +109,8 @@ class Atem {
   Atem(const char* address);
   ~Atem();
 
+  const ip4_addr_t* GetAddress() const { return &address_; };
+
   /**
    * @brief Get the State Mutex
    *
@@ -368,6 +370,7 @@ class Atem {
   esp_err_t SendCommands(const std::vector<AtemCommand*>& commands);
 
  protected:
+  ip4_addr_t address_;
   int sockfd_;
 
   // Connection state
