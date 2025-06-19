@@ -3,11 +3,14 @@
 namespace atem {
 
 static const char *TAG{"Atem"};
-ESP_EVENT_DEFINE_BASE(ATEM_EVENT);
+
+inline void operator<<(uint32_t &lhs, const Event &rhs) {
+  lhs |= 1 << std::to_underlying(rhs);
+}
 
 // MARK: Constructor and deconstructor
 
-Atem::Atem(const char *address) {
+Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
   // Try to create a socket
   struct addrinfo hints, *servinfo, *p;
   int rv;
@@ -205,6 +208,7 @@ void Atem::task_() {
         this->local_id_ = 0;
         this->remote_id_ = 0;
         this->state_ = ConnectionState::kInitializing;
+        boot_events = 0;
         AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
         this->SendPacket_(&p);
       } else if (init_status == 0x3) {  // No connection available
@@ -226,12 +230,9 @@ void Atem::task_() {
       this->state_ = ConnectionState::kActive;
 
       // Send event's
-      uint16_t packet_id = 1;  // Init packet ID
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++) {
         if (boot_events & (1 << i)) {
-          ESP_ERROR_CHECK_WITHOUT_ABORT(
-              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0)
-          );
+          event_cb_(static_cast<Event>(i), 1);
         }
       }
     }
@@ -365,7 +366,7 @@ void Atem::task_() {
 
       switch (ATEM_CMD(((char *)command.GetCmd()))) {
         case ATEM_CMD("_mpl"): {  // Media Player
-          event |= 1 << ATEM_EVENT_MEDIA_PLAYER;
+          event << Event::kMediaPlayer;
 
           const MediaPlayer media_player = {
               .still = command.GetData<uint8_t *>()[0],
@@ -375,7 +376,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("_MeC"): {  // Mix Effect Config
-          event |= 1 << ATEM_EVENT_TOPOLOGY;
+          event << Event::kTopology;
           uint8_t me = command.GetData(0);
           uint8_t num_keyer = command.GetData(1);
 
@@ -384,7 +385,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("_ver"): {  // Protocol version
-          event |= 1 << ATEM_EVENT_PROTOCOL_VERSION;
+          event << Event::kVersion;
 
           const ProtocolVersion version = {
               .major = command.GetDataS<uint16_t>(0),
@@ -394,7 +395,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("_pin"): {  // Product Id
-          event |= 1 << ATEM_EVENT_PRODUCT_ID;
+          event << Event::kPid;
           memcpy(
               this->product_id_, command.GetData<char *>(),
               sizeof(this->product_id_)
@@ -406,7 +407,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("_top"): {  // Topology
-          event |= 1 << ATEM_EVENT_TOPOLOGY;
+          event << Event::kTopology;
 
           const Topology top = {
               .me = command.GetData(0),
@@ -434,7 +435,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("AuxS"): {  // AUX Select
-          event |= 1 << ATEM_EVENT_AUX;
+          event << Event::kAux;
           channel = command.GetData<uint8_t *>()[0];
           if (this->aux_out_.size() <= channel) break;
 
@@ -444,7 +445,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("DskB"): {  // DSK Source
-          event |= 1 << ATEM_EVENT_DSK;
+          event << Event::kDsk;
           keyer = command.GetData(0);
           if (this->dsk_.size() <= keyer) break;
 
@@ -456,7 +457,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("DskP"): {  // DSK Properties
-          event |= 1 << ATEM_EVENT_DSK;
+          event << Event::kDsk;
           keyer = command.GetData<uint8_t *>()[0];
           if (this->dsk_.size() <= keyer) break;
 
@@ -467,7 +468,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("DskS"): {  // DSK State
-          event |= 1 << ATEM_EVENT_DSK;
+          event << Event::kDsk;
           keyer = command.GetData<uint8_t *>()[0];
           if (this->dsk_.size() <= keyer) break;
 
@@ -480,7 +481,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("FtbS"): {  // Fade to black State
-          event |= 1 << ATEM_EVENT_FADE_TO_BLACK;
+          event << Event::kFtb;
           me = command.GetData<uint8_t *>()[0];
 
           const FadeToBlack ftb = {
@@ -493,7 +494,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("InPr"): {  // Input Property
-          event |= 1 << ATEM_EVENT_INPUT_PROPERTIES;
+          event << Event::kInpr;
           source = command.GetDataS<Source>(0);
 
           InputProperty inpr;
@@ -523,7 +524,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("KeBP"): {  // Usk properties
-          event |= 1 << ATEM_EVENT_USK;
+          event << Event::kUsk;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
@@ -551,7 +552,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("KeDV"): {  // Usk properties DVE
-          event |= 1 << ATEM_EVENT_USK_DVE;
+          event << Event::kUskDve;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
@@ -573,7 +574,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("KeFS"): {  // Usk Fly State
-          event |= 1 < ATEM_EVENT_USK_DVE;
+          event << Event::kUskDve;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
@@ -587,7 +588,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("KeOn"): {  // Key on Air
-          event |= 1 << ATEM_EVENT_USK;
+          event << Event::kUsk;
           me = command.GetData<uint8_t *>()[0];
           keyer = command.GetData<uint8_t *>()[1];
 
@@ -605,7 +606,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("MPCE"): {  // Media Player Source
-          event |= 1 << ATEM_EVENT_MEDIA_PLAYER;
+          event << Event::kMediaPlayer;
           mediaplayer = command.GetData<uint8_t *>()[0];
           if (this->media_player_source_.size() <= mediaplayer) break;
 
@@ -623,7 +624,7 @@ void Atem::task_() {
           bool is_used = command.GetData<uint8_t *>()[4];
 
           if (type != 0) break;  // Only work with stills
-          event |= 1 << ATEM_EVENT_MEDIA_POOL;
+          event << Event::kMediaPool;
 
           const std::string name = is_used
                                        ? std::string(
@@ -644,7 +645,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("PrgI"): {  // Program Input
-          event |= 1 << ATEM_EVENT_SOURCE;
+          event << Event::kSource;
           me = command.GetData<uint8_t *>()[0];
 
           if (this->mix_effect_.size() <= me) break;
@@ -654,7 +655,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("PrvI"): {  // Preview Input
-          event |= 1 << ATEM_EVENT_SOURCE;
+          event << Event::kSource;
           me = command.GetData<uint8_t *>()[0];
 
           if (this->mix_effect_.size() <= me) break;
@@ -665,14 +666,14 @@ void Atem::task_() {
         }
         case ATEM_CMD("StRS"): {  // Stream Status
           if (command.GetLength() != 12) continue;
-          event |= 1 << ATEM_EVENT_STREAM;
+          event << Event::kStream;
           this->stream_.Set(
               this->sqeuence_, (StreamState)(command.GetData<uint8_t *>()[1])
           );
           break;
         }
         case ATEM_CMD("TrPs"): {  // Transition Position
-          event |= 1 << ATEM_EVENT_TRANSITION_POSITION;
+          event << Event::kTrPos;
 
           me = command.GetData(0);
           if (this->mix_effect_.size() <= me) break;
@@ -687,7 +688,7 @@ void Atem::task_() {
           break;
         }
         case ATEM_CMD("TrSS"): {  // Transition State
-          event |= 1 << ATEM_EVENT_TRANSITION_STATE;
+          event << Event::kTrState;
 
           me = command.GetData(0);
           if (this->mix_effect_.size() <= me) break;
@@ -706,13 +707,14 @@ void Atem::task_() {
 
     // Send events
     if (event != 0 && this->state_ == ConnectionState::kActive) {
-      uint16_t packet_id = packet.GetId();
+      const uint16_t packet_id = packet.GetId();
 
-      for (int32_t i = 0; i < sizeof(event) * 8; i++)
-        if (event & (1 << i))
-          ESP_ERROR_CHECK_WITHOUT_ABORT(
-              esp_event_post(ATEM_EVENT, i, &packet_id, sizeof(packet_id), 0)
-          );
+      for (int32_t i = 0; i < sizeof(event) * 8; i++) {
+        if (event & (1 << i)) {
+          event_cb_(static_cast<Event>(i), packet_id);
+        }
+      }
+
     } else {
       boot_events |= event;
     }
@@ -742,7 +744,7 @@ esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
 
   // Copy commands into packet
   uint16_t i = 12;
-  for (auto c : commands) {
+  for (auto &c : commands) {
     if (unlikely(c == nullptr)) continue;
     c->PrepairCommand(this->version_.Get());
     memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
@@ -842,10 +844,7 @@ void Atem::Reconnect_() {
 
   // Send event that Product ID has changed
   if (was_connected) {
-    uint16_t packet_id = 0;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_post(
-        ATEM_EVENT, ATEM_EVENT_PRODUCT_ID, &packet_id, sizeof(packet_id), 0
-    ));
+    event_cb_(Event::kPid, 0);
   }
 
   // Send init request

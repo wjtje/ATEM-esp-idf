@@ -15,7 +15,9 @@
 
 #include <array>
 #include <cmath>
+#include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,85 +30,87 @@
 
 namespace atem {
 
-ESP_EVENT_DECLARE_BASE(ATEM_EVENT);
-
 /**
  * @brief Atem events
  *
  * Events are commands clusted by type, so it's easer to consume (that's my
  * opinion).
  */
-enum : int32_t {
+enum class Event : int32_t {
   /**
    * @brief AuxS
    */
-  ATEM_EVENT_AUX,
+  kAux,
   /**
    * @brief DskB / DskP / DskS
    */
-  ATEM_EVENT_DSK,
+  kDsk,
   /**
    * @brief FtbS
    */
-  ATEM_EVENT_FADE_TO_BLACK,
+  kFtb,
   /**
    * @brief InPr
    */
-  ATEM_EVENT_INPUT_PROPERTIES,
+  kInpr,
   /**
    * @brief KeBP / KeOn
    */
-  ATEM_EVENT_USK,
+  kUsk,
   /**
    * @brief KeDV / KeFS
    */
-  ATEM_EVENT_USK_DVE,
+  kUskDve,
   /**
    * @brief _mpl / MPCE
    */
-  ATEM_EVENT_MEDIA_PLAYER,
+  kMediaPlayer,
   /**
    * @brief MPfe
    */
-  ATEM_EVENT_MEDIA_POOL,
+  kMediaPool,
   /**
    * @brief _pin
    */
-  ATEM_EVENT_PRODUCT_ID,
+  kPid,
   /**
    * @brief _ver
    */
-  ATEM_EVENT_PROTOCOL_VERSION,
+  kVersion,
   /**
    * @brief PrgI / PrvI
    */
-  ATEM_EVENT_SOURCE,
+  kSource,
   /**
    * @brief StRS
    */
-  ATEM_EVENT_STREAM,
+  kStream,
   /**
    * @brief _top
    */
-  ATEM_EVENT_TOPOLOGY,
+  kTopology,
   /**
    * @brief TrPs
    */
-  ATEM_EVENT_TRANSITION_POSITION,
+  kTrPos,
   /**
    * @brief TrSS
    */
-  ATEM_EVENT_TRANSITION_STATE,
+  kTrState,
 };
 
 class Atem {
  public:
+  using EventCb = std::function<void(Event, uint16_t)>;
+
   /**
    * @brief Create a new connection to the ATEM
    *
-   * @param address The address of the ATEM to connect to
+   * @param [in] address The address of the ATEM to connect to
+   * @param [in] event_cb A callback function that will be executed when an
+   * internal event is created.
    */
-  Atem(const char* address);
+  Atem(const char* address, EventCb event_cb);
   ~Atem();
 
   const ip4_addr_t* GetAddress() const { return &address_; };
@@ -385,11 +389,13 @@ class Atem {
   uint16_t local_id_{0};
   uint16_t remote_id_{0};
 
+  EventCb event_cb_;
+
   // Check missing packets
   SequenceCheck sqeuence_;
 
-// Packets send
 #if CONFIG_ATEM_STORE_SEND
+  // Packets send
   SemaphoreHandle_t send_mutex_{xSemaphoreCreateMutex()};
   std::vector<AtemPacket*> send_packets_;
 #endif
