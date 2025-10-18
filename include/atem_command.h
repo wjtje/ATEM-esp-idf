@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include <initializer_list>
+#include <memory>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -30,6 +31,10 @@ namespace atem {
  */
 class AtemCommand {
  public:
+  using UPtr = std::unique_ptr<AtemCommand>;
+
+  inline operator UPtr() { return UPtr(this); }
+
   AtemCommand(void *data) : has_alloc_(false), data_(data) {}
   /**
    * @brief Construct a new Atem Command object

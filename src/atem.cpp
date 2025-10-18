@@ -517,7 +517,8 @@ void Atem::task_() {
           if (it != this->input_properties_.end()) {
             (*it).second.Set(this->sqeuence_, inpr);
           } else {
-            input_properties_.insert({source, AtemState(this->sqeuence_, inpr)}
+            input_properties_.insert(
+                {source, AtemState(this->sqeuence_, inpr)}
             );
           }
 
@@ -725,11 +726,11 @@ void Atem::task_() {
 
 // MARK Public functions
 
-esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
+esp_err_t Atem::SendCommands(std::span<const AtemCommand::UPtr> commands) {
   // Get the length of the commands
   uint16_t length = 12;  // Packet header
   uint16_t amount = 0;
-  for (auto c : commands) {
+  for (auto &c : commands) {
     if (unlikely(c == nullptr)) continue;
     length += c->GetLength();
     amount++;
@@ -749,7 +750,6 @@ esp_err_t Atem::SendCommands(const std::vector<AtemCommand *> &commands) {
     c->PrepairCommand(this->version_.Get());
     memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
     i += c->GetLength();
-    delete c;
   }
 
   if (unlikely(i != length)) {

@@ -16,8 +16,10 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -110,10 +112,10 @@ class Atem {
    * @param [in] event_cb A callback function that will be executed when an
    * internal event is created.
    */
-  Atem(const char* address, EventCb event_cb);
+  Atem(const char *address, EventCb event_cb);
   ~Atem();
 
-  const ip4_addr_t* GetAddress() const { return &address_; };
+  const ip4_addr_t *GetAddress() const { return &address_; };
 
   /**
    * @brief Get the State Mutex
@@ -142,16 +144,16 @@ class Atem {
    *
    * @return const std::map<Source, InputProperty> &
    */
-  const std::map<Source, AtemState<InputProperty>>& GetInputProperties() const {
+  const std::map<Source, AtemState<InputProperty>> &GetInputProperties() const {
     return this->input_properties_;
   }
 
-  const std::vector<Dsk>& GetDsk() const { return this->dsk_; }
-  const std::vector<MixEffect>& GetMixEffect() const {
+  const std::vector<Dsk> &GetDsk() const { return this->dsk_; }
+  const std::vector<MixEffect> &GetMixEffect() const {
     return this->mix_effect_;
   }
-  const std::vector<AtemState<MediaPlayerSource>>& GetMediaPlayerSources(
-  ) const {
+  const std::vector<AtemState<MediaPlayerSource>> &
+  GetMediaPlayerSources() const {
     return this->media_player_source_;
   }
 
@@ -163,7 +165,7 @@ class Atem {
    *
    * @return Source*
    */
-  const std::vector<AtemState<Source>>& GetAuxOutputs() const {
+  const std::vector<AtemState<Source>> &GetAuxOutputs() const {
     return this->aux_out_;
   }
 
@@ -174,7 +176,7 @@ class Atem {
    *
    * @return const std::map<uint16_t, char*> {index, file name}
    */
-  const auto& GetMediaPlayerFileName() const {
+  const auto &GetMediaPlayerFileName() const {
     return this->media_player_file_;
   }
 
@@ -196,7 +198,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetAuxOutput(uint8_t channel, Source& source) const;
+  bool GetAuxOutput(uint8_t channel, Source &source) const;
   /**
    * @brief Get the state of a DSK
    *
@@ -205,7 +207,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskState(uint8_t keyer, DskState& state) const;
+  bool GetDskState(uint8_t keyer, DskState &state) const;
   /**
    * @brief Get the current fill and key source of a DSK
    *
@@ -214,7 +216,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskSource(uint8_t keyer, DskSource& source) const;
+  bool GetDskSource(uint8_t keyer, DskSource &source) const;
   /**
    * @brief Get the properties of a DSK
    *
@@ -223,7 +225,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskProperties(uint8_t keyer, DskProperties& properties) const;
+  bool GetDskProperties(uint8_t keyer, DskProperties &properties) const;
   /**
    * @brief Get the state of the Fade to black on a specific MixEffect.
    *
@@ -232,14 +234,14 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetFtbState(uint8_t me, FadeToBlack& state) const;
+  bool GetFtbState(uint8_t me, FadeToBlack &state) const;
   /**
    * @brief Get information about the current stream state.
    *
    * @param state[out] A variable that will store the result
    * @return Weather or not the variable is valid
    */
-  bool GetStreamState(StreamState& state) const;
+  bool GetStreamState(StreamState &state) const;
   /**
    * @brief Get information about how many stills and clip the media player can
    * hold
@@ -248,7 +250,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayer(MediaPlayer& state) const;
+  bool GetMediaPlayer(MediaPlayer &state) const;
   /**
    * @brief Get the access to the active source on a specific mediaplayer
    *
@@ -258,7 +260,7 @@ class Atem {
    * @return Weather or not the variable is valid
    */
   bool GetMediaPlayerSource(
-      uint8_t mediaplayer, MediaPlayerSource& state
+      uint8_t mediaplayer, MediaPlayerSource &state
   ) const;
 
   /**
@@ -269,20 +271,20 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetPreviewInput(uint8_t me, Source& source) const;
+  bool GetPreviewInput(uint8_t me, Source &source) const;
   /**
    * @brief Get the Product Id (model) of the connected atem.
    *
    * @return const char*
    */
-  const char* GetProductId() const { return this->product_id_; }
+  const char *GetProductId() const { return this->product_id_; }
   /**
    * @brief Get the current program source active on ME
    *
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProgramInput(uint8_t me, Source& source) const;
+  bool GetProgramInput(uint8_t me, Source &source) const;
   /**
    * @brief Get the Protocol Version
    *
@@ -290,7 +292,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProtocolVersion(ProtocolVersion& version) const;
+  bool GetProtocolVersion(ProtocolVersion &version) const;
   /**
    * @brief Get the topology of the connected ATEM
    *
@@ -298,7 +300,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTopology(Topology& topology) const;
+  bool GetTopology(Topology &topology) const;
   /**
    * @brief Get the information about the current transition state on a ME
    *
@@ -307,7 +309,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionState(uint8_t me, TransitionState& state) const;
+  bool GetTransitionState(uint8_t me, TransitionState &state) const;
   /**
    * @brief Get the information about the current transition position on a ME
    *
@@ -316,7 +318,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionPosition(uint8_t me, TransitionPosition& position) const;
+  bool GetTransitionPosition(uint8_t me, TransitionPosition &position) const;
   /**
    * @brief Get the Usk state
    *
@@ -326,7 +328,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskState(uint8_t me, uint8_t keyer, UskState& state) const;
+  bool GetUskState(uint8_t me, uint8_t keyer, UskState &state) const;
   /**
    * @brief Get the number of Usk on a given ME
    *
@@ -335,7 +337,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskNumber(uint8_t me, uint8_t& count) const;
+  bool GetUskNumber(uint8_t me, uint8_t &count) const;
   /**
    * @brief Get is a USK is on air
    *
@@ -345,7 +347,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskOnAir(uint8_t me, uint8_t keyer, bool& state) const;
+  bool GetUskOnAir(uint8_t me, uint8_t keyer, bool &state) const;
   /**
    * @brief Get the Usk Dve state
    *
@@ -355,7 +357,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskDveState(uint8_t me, uint8_t keyer, DveState& state) const;
+  bool GetUskDveState(uint8_t me, uint8_t keyer, DveState &state) const;
 
   /**
    * @brief Send a list of commands to the ATEM, memory is automaticaly
@@ -371,7 +373,14 @@ class Atem {
    *
    * @return If the packet was send (added to queue) successfully
    */
-  esp_err_t SendCommands(const std::vector<AtemCommand*>& commands);
+  esp_err_t SendCommands(std::span<const AtemCommand::UPtr> commands);
+  inline esp_err_t SendCommands(
+      std::initializer_list<const AtemCommand::UPtr> commands
+  ) {
+    return SendCommands(
+        std::span<const AtemCommand::UPtr>(commands.begin(), commands.end())
+    );
+  }
 
  protected:
   ip4_addr_t address_;
@@ -397,7 +406,7 @@ class Atem {
 #if CONFIG_ATEM_STORE_SEND
   // Packets send
   SemaphoreHandle_t send_mutex_{xSemaphoreCreateMutex()};
-  std::vector<AtemPacket*> send_packets_;
+  std::vector<AtemPacket *> send_packets_;
 #endif
 
   // ATEM state
@@ -423,7 +432,7 @@ class Atem {
    *
    * @param packet
    */
-  esp_err_t SendPacket_(const AtemPacket* packet);
+  esp_err_t SendPacket_(const AtemPacket *packet);
   /**
    * @brief Close current connection, Reset variables, and send INIT request.
    */
