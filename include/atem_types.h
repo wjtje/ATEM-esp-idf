@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 #include "atem_state.h"
@@ -127,6 +128,14 @@ struct InputProperty {
 
   /// @warning This string is not NULL terminated
   char name_short[4];
+
+  std::string_view GetShortName() const {
+    return std::string_view(name_short, strnlen(name_short, 4));
+  }
+
+  std::string_view GetLongName() const {
+    return std::string_view(name_long, strnlen(name_long, 20));
+  }
 };
 
 struct TransitionPosition {
