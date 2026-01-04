@@ -35,7 +35,17 @@ class AtemCommand {
 
   inline operator UPtr() { return UPtr(this); }
 
-  AtemCommand(void *data) : has_alloc_(false), data_(data) {}
+  /**
+   * @brief Construct a new Atem Command object from an exsisting memory buffer
+   *
+   * @param [in] data
+   */
+  AtemCommand(void *data) {
+    heap.on_heap_ = true;
+    heap.has_alloc_ = false;
+    heap.ptr_ = data;
+  }
+
   /**
    * @brief Construct a new Atem Command object
    *
@@ -43,7 +53,7 @@ class AtemCommand {
    * @param length Length is calculated by combining the header (8 bytes) + the
    * data
    */
-  AtemCommand(const char *cmd, uint16_t length);
+  AtemCommand(std::string_view cmd, uint16_t length);
   virtual ~AtemCommand();
 
   /**
@@ -62,13 +72,15 @@ class AtemCommand {
    *
    * @return uint16_t
    */
-  uint16_t GetLength() { return ntohs(((uint16_t *)this->data_)[0]); }
+  uint16_t GetLength() { return ntohs(((uint16_t *)this->GetRawData())[0]); }
   /**
    * @brief Get the cmd, this isn't null terminated
    *
    * @return void*
    */
-  void *GetCmd() { return (uint8_t *)this->data_ + 4; }
+  std::string_view GetCmd() const {
+    return std::string_view((const char *)(this->GetRawData()) + 4, 4);
+  }
   /**
    * @brief Get the data from the command (excluding the header)
    *
@@ -77,7 +89,7 @@ class AtemCommand {
    */
   template <typename T>
   T GetData() {
-    return (T)((uint8_t *)this->data_ + 8);
+    return (T)((uint8_t *)this->GetRawData() + 8);
   }
   /**
    * @brief Get the data from the command (excluding the header)
@@ -87,7 +99,7 @@ class AtemCommand {
    */
   template <typename T = uint8_t>
   T GetData(size_t i) {
-    return T(((uint8_t *)this->data_)[8 + i]);
+    return T(((uint8_t *)this->GetRawData())[8 + i]);
   }
   /**
    * @brief Get the data from the command (excluding the header), short (2
@@ -100,7 +112,7 @@ class AtemCommand {
    */
   template <typename T>
   T GetDataS(size_t i) {
-    return (T)ntohs(((uint16_t *)this->data_)[4 + i]);
+    return (T)ntohs(((uint16_t *)this->GetRawData())[4 + i]);
   }
   /**
    * @brief Get the data from the command (excluding the header), long (4
@@ -113,7 +125,7 @@ class AtemCommand {
    */
   template <typename T>
   T GetDataL(size_t i) {
-    return (T)ntohl(((uint32_t *)this->data_)[2 + i]);
+    return (T)ntohl(((uint32_t *)this->GetRawData())[2 + i]);
   }
   /**
    * @brief Get the access to the raw buffer, use GetLength to get the size of
@@ -121,11 +133,26 @@ class AtemCommand {
    *
    * @return const void*
    */
-  const void *GetRawData() { return this->data_; }
+  inline const void *GetRawData() const {
+    return this->heap.on_heap_ ? this->heap.ptr_ : this->stack.data_;
+  }
 
- protected:
-  bool has_alloc_{true};
-  void *data_;
+ private:
+  union {
+    struct {
+      // Is the data allocated on the heap
+      bool on_heap_ : 1;
+      // Is this object responable for calling free
+      bool has_alloc_ : 1;
+      void *ptr_;
+    } heap;
+
+    struct {
+      // Is the data allocated on the heap
+      bool on_heap_ : 1;
+      uint8_t data_[27];
+    } stack;
+  };
 };
 
 namespace cmd {
@@ -138,6 +165,8 @@ class Auto : public AtemCommand {
    * @param [in] me Which MixEffect to perform this action on
    */
   Auto(uint8_t me) : AtemCommand("DAut", 12) { GetData<uint8_t *>()[0] = me; }
+
+  static UPtr Create(uint8_t me) { return UPtr(new Auto(me)); }
 };
 
 class AuxInput : public AtemCommand {
@@ -153,11 +182,17 @@ class AuxInput : public AtemCommand {
     GetData<uint8_t *>()[1] = channel;
     GetData<uint16_t *>()[1] = htons(source);
   }
+
+  static UPtr Create(uint8_t channel, Source source) {
+    return UPtr(new AuxInput(channel, source));
+  }
 };
 
 class CaptureStill : public AtemCommand {
  public:
   CaptureStill() : AtemCommand("Capt", 8) {}
+
+  static UPtr Create() { return UPtr(new CaptureStill()); }
 };
 
 class Cut : public AtemCommand {
@@ -168,6 +203,8 @@ class Cut : public AtemCommand {
    * @param [in] me Which MixEffect to perform the action on
    */
   Cut(uint8_t me) : AtemCommand("DCut", 12) { GetData<uint8_t *>()[0] = me; }
+
+  static UPtr Create(uint8_t me) { return UPtr(new Cut(me)); }
 };
 
 class DskAuto : public AtemCommand {
@@ -186,6 +223,8 @@ class DskAuto : public AtemCommand {
     }
   }
 
+  static UPtr Create(uint8_t keyer) { return UPtr(new DskAuto(keyer)); }
+
  protected:
   uint8_t keyer_;
 };
@@ -202,6 +241,10 @@ class DskOnAir : public AtemCommand {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint8_t *>()[1] = state;
   }
+
+  static UPtr Create(uint8_t keyer, bool state) {
+    return UPtr(new DskOnAir(keyer, state));
+  }
 };
 
 class DskFill : public AtemCommand {
@@ -215,6 +258,10 @@ class DskFill : public AtemCommand {
   DskFill(uint8_t keyer, Source source) : AtemCommand("CDsF", 12) {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
+  }
+
+  static UPtr Create(uint8_t keyer, Source source) {
+    return UPtr(new DskFill(keyer, source));
   }
 };
 
@@ -230,6 +277,10 @@ class DskKey : public AtemCommand {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
   }
+
+  static UPtr Create(uint8_t keyer, Source source) {
+    return UPtr(new DskKey(keyer, source));
+  }
 };
 
 class DskTie : public AtemCommand {
@@ -244,6 +295,10 @@ class DskTie : public AtemCommand {
     GetData<uint8_t *>()[0] = keyer;
     GetData<uint8_t *>()[1] = state;
   }
+
+  static UPtr Create(uint8_t keyer, bool state) {
+    return UPtr(DskTie(keyer, state));
+  }
 };
 
 class FadeToBlack : public AtemCommand {
@@ -256,6 +311,8 @@ class FadeToBlack : public AtemCommand {
   FadeToBlack(uint8_t me) : AtemCommand("FtbA", 12) {
     GetData<uint8_t *>()[0] = me;
   }
+
+  static UPtr Create(uint8_t me) { return UPtr(new FadeToBlack(me)); }
 };
 
 class MediaPlayerSource : public AtemCommand {
@@ -269,8 +326,10 @@ class MediaPlayerSource : public AtemCommand {
    * @param [in|optional] clip The new clip source
    */
   MediaPlayerSource(
-      uint8_t mediaplayer, std::optional<uint8_t> type,
-      std::optional<uint8_t> still, std::optional<uint8_t> clip
+    uint8_t mediaplayer,
+    std::optional<uint8_t> type,
+    std::optional<uint8_t> still,
+    std::optional<uint8_t> clip
   )
       : AtemCommand("MPSS", 16) {
     uint8_t mask = 0;
@@ -293,6 +352,15 @@ class MediaPlayerSource : public AtemCommand {
     GetData<uint8_t *>()[0] = mask;
     GetData<uint8_t *>()[1] = mediaplayer;
   }
+
+  static UPtr Create(
+    uint8_t mediaplayer,
+    std::optional<uint8_t> type,
+    std::optional<uint8_t> still,
+    std::optional<uint8_t> clip
+  ) {
+    return UPtr(new MediaPlayerSource(mediaplayer, type, still, clip));
+  }
 };
 
 class UskDveKeyFrameProperties : public AtemCommand {
@@ -309,15 +377,18 @@ class UskDveKeyFrameProperties : public AtemCommand {
    */
   template <template <class...> class Container, class... Args>
   UskDveKeyFrameProperties(
-      uint8_t me, uint8_t keyer, UskDveKeyFrame key_frame,
-      const Container<DveProperty, Args...> &p
+    uint8_t me,
+    uint8_t keyer,
+    UskDveKeyFrame key_frame,
+    const Container<DveProperty, Args...> &p
   )
       : AtemCommand("CKFP", 64) {
     uint32_t mask = 0;
 
     for (auto c : p) {
       mask |= 1 << (uint8_t)c.property;
-      ((uint32_t *)this->data_)[4 + (uint8_t)c.property] = htonl(c.value);
+      ((uint32_t *)this->GetRawData())[4 + (uint8_t)c.property] =
+        htonl(c.value);
     }
 
     GetData<uint32_t *>()[0] = htonl(mask);
@@ -338,8 +409,10 @@ class UskDveRunFlyingKey : public AtemCommand {
    * @param [in] run_to_inf_i Run to infinite index
    */
   UskDveRunFlyingKey(
-      uint8_t me, uint8_t keyer, UskDveKeyFrame key_frame,
-      std::optional<uint8_t> run_to_inf_i = std::nullopt
+    uint8_t me,
+    uint8_t keyer,
+    UskDveKeyFrame key_frame,
+    std::optional<uint8_t> run_to_inf_i = std::nullopt
   )
       : AtemCommand("RFlK", 16) {
     GetData<uint8_t *>()[0] = 0;
@@ -363,14 +436,15 @@ class UskDveProperties : public AtemCommand {
    */
   template <template <class...> class Container, class... Args>
   UskDveProperties(
-      uint8_t me, uint8_t keyer, const Container<DveProperty, Args...> &p
+    uint8_t me, uint8_t keyer, const Container<DveProperty, Args...> &p
   )
       : AtemCommand("CKDV", 72) {
     uint32_t mask = 0;
 
     for (auto c : p) {
       mask |= 1 << (uint8_t)c.property;
-      ((uint32_t *)this->data_)[4 + (uint8_t)c.property] = htonl(c.value);
+      ((uint32_t *)this->GetRawData())[4 + (uint8_t)c.property] =
+        htonl(c.value);
     }
 
     GetData<uint32_t *>()[0] = htonl(mask);
@@ -393,6 +467,10 @@ class UskFill : public AtemCommand {
     GetData<uint8_t *>()[1] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
   }
+
+  static UPtr Create(uint8_t me, uint8_t keyer, Source source) {
+    return UPtr(new UskFill(me, keyer, source));
+  }
 };
 
 class UskKey : public AtemCommand {
@@ -410,6 +488,10 @@ class UskKey : public AtemCommand {
     GetData<uint8_t *>()[1] = keyer;
     GetData<uint16_t *>()[1] = htons(source);
   }
+
+  static UPtr Create(uint8_t me, uint8_t keyer, Source source) {
+    return UPtr(new UskKey(me, keyer, source));
+  }
 };
 
 class UskType : public AtemCommand {
@@ -423,8 +505,10 @@ class UskType : public AtemCommand {
    * @param [in] flying_key_enabled
    */
   UskType(
-      uint8_t me, int8_t keyer, std::optional<UskKeyerType> type,
-      std::optional<bool> flying_key_enabled
+    uint8_t me,
+    int8_t keyer,
+    std::optional<UskKeyerType> type,
+    std::optional<bool> flying_key_enabled
   )
       : AtemCommand("CKTp", 16) {
     uint8_t mask = 0;
@@ -444,6 +528,15 @@ class UskType : public AtemCommand {
 
     GetData<uint8_t *>()[0] = mask;
   }
+
+  static UPtr Create(
+    uint8_t me,
+    int8_t keyer,
+    std::optional<UskKeyerType> type,
+    std::optional<bool> flying_key_enabled
+  ) {
+    return UPtr(new UskType(me, keyer, type, flying_key_enabled));
+  }
 };
 
 class UskOnAir : public AtemCommand {
@@ -460,6 +553,10 @@ class UskOnAir : public AtemCommand {
     GetData<uint8_t *>()[1] = key;
     GetData<uint8_t *>()[2] = enabled;
   }
+
+  static UPtr Create(uint8_t me, uint8_t key, bool enabled) {
+    return UPtr(new UskOnAir(me, key, enabled));
+  }
 };
 
 class PreviewInput : public AtemCommand {
@@ -473,6 +570,10 @@ class PreviewInput : public AtemCommand {
   PreviewInput(uint8_t me, Source source) : AtemCommand("CPvI", 12) {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(source);
+  }
+
+  static UPtr Create(uint8_t me, Source source) {
+    return UPtr(new PreviewInput(me, source));
   }
 };
 
@@ -488,6 +589,10 @@ class ProgramInput : public AtemCommand {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(source);
   }
+
+  static UPtr Create(uint8_t me, Source source) {
+    return UPtr(new ProgramInput(me, source));
+  }
 };
 
 class SaveStartupState : public AtemCommand {
@@ -496,6 +601,8 @@ class SaveStartupState : public AtemCommand {
    * @brief Save the current state of the ATEM as its startup state
    */
   SaveStartupState() : AtemCommand("SRsv", 12) { GetData<uint32_t *>()[0] = 0; }
+
+  static UPtr Create() { return UPtr(new SaveStartupState()); }
 };
 
 class Stream : public AtemCommand {
@@ -508,6 +615,8 @@ class Stream : public AtemCommand {
   Stream(bool state) : AtemCommand("StrR", 12) {
     GetData<uint8_t *>()[0] = state;
   }
+
+  static UPtr Create(bool state) { return UPtr(new Stream(state)); }
 };
 
 class TransitionPosition : public AtemCommand {
@@ -522,6 +631,10 @@ class TransitionPosition : public AtemCommand {
     GetData<uint8_t *>()[0] = me;
     GetData<uint16_t *>()[1] = htons(position);
   }
+
+  static UPtr Create(uint8_t me, uint16_t position) {
+    return UPtr(new TransitionPosition(me, position));
+  }
 };
 
 class TransitionState : public AtemCommand {
@@ -534,15 +647,24 @@ class TransitionState : public AtemCommand {
    * @param [in] next A bitmask of the Keyers active
    */
   TransitionState(
-      uint8_t me, std::optional<TransitionStyle> style,
-      std::optional<uint8_t> next
+    uint8_t me,
+    std::optional<TransitionStyle> style,
+    std::optional<uint8_t> next
   )
       : AtemCommand("CTTp", 12) {
     GetData<uint8_t *>()[0] =
-        (style.has_value() ? (1 << 0) : 0) | (next.has_value() ? (1 << 1) : 0);
+      (style.has_value() ? (1 << 0) : 0) | (next.has_value() ? (1 << 1) : 0);
     GetData<uint8_t *>()[1] = me;
     GetData<uint8_t *>()[2] = style.value_or(TransitionStyle::MIX);
     GetData<uint8_t *>()[3] = next.value_or(0);
+  }
+
+  static UPtr Create(
+    uint8_t me,
+    std::optional<TransitionStyle> style,
+    std::optional<uint8_t> next
+  ) {
+    return UPtr(new TransitionState(me, style, next));
   }
 };
 

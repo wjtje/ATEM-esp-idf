@@ -364,7 +364,7 @@ void Atem::task_() {
         break;
       }
 
-      switch (ATEM_CMD(((char *)command.GetCmd()))) {
+      switch (ATEM_CMD((command.GetCmd().data()))) {
         case ATEM_CMD("_mpl"): {  // Media Player
           event << Event::kMediaPlayer;
 
