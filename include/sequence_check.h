@@ -49,6 +49,7 @@ class SequenceCheck {
     this->received_ |= 1 << offset;
     return true;
   }
+
   /**
    * @brief Returns the ID of the missing packet
    *
@@ -69,12 +70,14 @@ class SequenceCheck {
 
     return -1;  // How did we get here?
   }
+
   /**
    * @brief Returns the last id received (or added) using the Add function.
    *
    * @return int16_t
    */
   inline int16_t GetLastId() const { return this->last_id_; }
+
   /**
    * @brief Check weather or not the sequence contains this id
    *
@@ -87,14 +90,21 @@ class SequenceCheck {
     const uint16_t offset = (this->offset_ - id) & INT16_MAX;
     return (offset < recv_len);
   }
+
   /**
-   * @brief Returns weather the id is new than the last id
+   * @brief Returns weather the id is new than the last id, if the difference is
+   * larger than 128, it's also considered as old.
    *
-   * @param id[in]
+   * This is an imperfect way of handing the roll over....
+   *
+   * @param [in] id
    * @return true When the parameter id is newer
    * @return false
    */
-  inline bool IsNewer(int16_t id) const { return this->last_id_ < id; }
+  bool IsNewer(int16_t id) const {
+    if (abs(this->last_id_ - id) > 128) return false;
+    return this->last_id_ < id;
+  }
 
  protected:
   int16_t offset_{1}, last_id_{0};

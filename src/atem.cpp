@@ -26,7 +26,7 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
 
   for (p = servinfo; p != NULL; p = p->ai_next) {
     if ((this->sockfd_ =
-             socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
+           socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
       continue;
 
     if (connect(this->sockfd_, p->ai_addr, p->ai_addrlen) == -1) {
@@ -36,7 +36,7 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
 
     // We only allow IPv4, so this is fine
     address_.addr =
-        reinterpret_cast<sockaddr_in *>(p->ai_addr)->sin_addr.s_addr;
+      reinterpret_cast<sockaddr_in *>(p->ai_addr)->sin_addr.s_addr;
     break;
   }
 
@@ -52,7 +52,7 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
   timeout.tv_sec = 1;
   timeout.tv_usec = 0;
   if ((rv = setsockopt(
-           this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout
+         this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout
        )) != 0) {
     ESP_LOGE(TAG, "Failed to setsockopt (%s)", strerror(rv));
   }
@@ -69,8 +69,8 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
 
   // Create background task
   if (unlikely(!xTaskCreate(
-          [](void *a) { ((Atem *)a)->task_(); }, "atem", 5 * 1024, this,
-          configMAX_PRIORITIES - 1, &this->task_handle_
+        [](void *a) { ((Atem *)a)->task_(); }, "atem", 5 * 1024, this,
+        configMAX_PRIORITIES - 1, &this->task_handle_
       ))) {
     ESP_LOGE(TAG, "Failed to create task");
     return;
@@ -95,8 +95,8 @@ Atem::~Atem() {
 
 size_t Atem::GetSize() const {
   size_t size = sizeof(*this);
-  size += input_properties_.size() *
-          sizeof(decltype(input_properties_)::value_type);
+  size +=
+    input_properties_.size() * sizeof(decltype(input_properties_)::value_type);
 
   for (const auto &me : mix_effect_) {
     size += sizeof(me);
@@ -160,8 +160,8 @@ void Atem::task_() {
     int recv_len = packet.GetLength();
     if (recv_len > sizeof(buffer)) {
       ESP_LOGE(
-          TAG, "Next package (len: %i) is larger than the buffer (len: %u)",
-          recv_len, sizeof(buffer)
+        TAG, "Next package (len: %i) is larger than the buffer (len: %u)",
+        recv_len, sizeof(buffer)
       );
       recv_len = sizeof(buffer);
     }
@@ -177,24 +177,24 @@ void Atem::task_() {
     // Check Length
     if (packet.GetLength() != len) {
       ESP_LOGW(
-          TAG, "Received packet with invalid size (%u instead of %u)", len,
-          packet.GetLength()
+        TAG, "Received packet with invalid size (%u instead of %u)", len,
+        packet.GetLength()
       );
       continue;
     }
 
-    ESP_LOGD(
-        TAG, "<- Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
-        packet.GetFlags(), packet.GetAckId(), packet.GetResendId(),
-        packet.GetId(), packet.GetLength()
+    ESP_LOGI(
+      TAG, "<- Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
+      packet.GetFlags(), packet.GetAckId(), packet.GetResendId(),
+      packet.GetId(), packet.GetLength()
     );
 
     // Check session id
     if (this->state_ == ConnectionState::kActive &&
         packet.GetSessionId() != this->session_id_) {
       ESP_LOGW(
-          TAG, "Received packet with invalid session (%02x instead of %02x)",
-          packet.GetSessionId(), this->session_id_
+        TAG, "Received packet with invalid session (%02x instead of %02x)",
+        packet.GetSessionId(), this->session_id_
       );
       continue;
     }
@@ -213,9 +213,9 @@ void Atem::task_() {
         this->SendPacket_(&p);
       } else if (init_status == 0x3) {  // No connection available
         ESP_LOGW(
-            TAG,
-            "Couldn't connect to the atem because it has no connection "
-            "slot available"
+          TAG,
+          "Couldn't connect to the atem because it has no connection "
+          "slot available"
         );
       } else {
         ESP_LOGW(TAG, "Received an unknown INIT status (%02x)", init_status);
@@ -224,7 +224,7 @@ void Atem::task_() {
 
     // INIT packets complete
     if (this->state_ == ConnectionState::kInitializing &&
-        packet.GetFlags() & 0x1 && packet.GetLength() == 12) {
+        IsAfterInitPacket_(packet)) {
       ESP_LOGI(TAG, "Initialization done");
       this->session_id_ = packet.GetSessionId();
       this->state_ = ConnectionState::kActive;
@@ -281,19 +281,20 @@ void Atem::task_() {
         should_parse_packet = false;  // We can ignore this packet
       }
 
-      // Check if we are receiving it in order
-      const int16_t missing_id = this->sqeuence_.GetMissing();
-      if (missing_id >= 0) {
-        ESP_LOGW(TAG, "Missing packet %u, trying to request it", missing_id);
+      // FIXME: Requesting missing packets is broken
+      // // Check if we are receiving it in order
+      // const int16_t missing_id = this->sqeuence_.GetMissing();
+      // if (missing_id >= 0) {
+      //   ESP_LOGW(TAG, "Missing packet %u, trying to request it", missing_id);
 
-        // Request missing
-        p.SetFlags(p.GetFlags() | 0x8);
-        p.SetResendId(missing_id);
-        p.SetId(0);
-        p.SetUnknown(0x100);
-      }
+      //   // Request missing
+      //   p.SetFlags(p.GetFlags() | 0x8);
+      //   p.SetResendId(missing_id);
+      //   p.SetId(0);
+      //   p.SetUnknown(0x100);
+      // }
 
-      if (state_ == ConnectionState::kActive || missing_id >= 0) {
+      if (state_ == ConnectionState::kActive) {  // || missing_id >= 0
         this->SendPacket_(&p);
       }
 
@@ -308,7 +309,7 @@ void Atem::task_() {
         int i = 0;
 
         for (std::vector<AtemPacket *>::iterator it =
-                 this->send_packets_.begin();
+               this->send_packets_.begin();
              it != this->send_packets_.end();) {
           if (i++ > 50) break;  // Limit to max 50 loops
 
@@ -316,8 +317,8 @@ void Atem::task_() {
           if ((((*it)->GetId() - id) & 0x7FFF) > 32 &&
               ((id - (*it)->GetId()) & 0x7FFF) > 32) {
             ESP_LOGD(
-                TAG, "Removing packet with id %i because it's to old",
-                (*it)->GetId()
+              TAG, "Removing packet with id %i because it's to old",
+              (*it)->GetId()
             );
             delete (*it);
             it = this->send_packets_.erase(it);
@@ -349,11 +350,11 @@ void Atem::task_() {
     Source source;
 
     // Lock access to the state
-    if (!xSemaphoreTake(this->state_mutex_, 150 / portTICK_PERIOD_MS)) {
+    if (!xSemaphoreTake(this->state_mutex_, pdMS_TO_TICKS(33))) {
       ESP_LOGW(
-          TAG,
-          "Failed to lock access to the state, make sure you only lock "
-          "the state for max 100ms."
+        TAG,
+        "Failed to lock access to the state, make sure you only lock "
+        "the state for max 20ms."
       );
       continue;
     }
@@ -369,8 +370,8 @@ void Atem::task_() {
           event << Event::kMediaPlayer;
 
           const MediaPlayer media_player = {
-              .still = command.GetData<uint8_t *>()[0],
-              .clip = command.GetData<uint8_t *>()[1],
+            .still = command.GetData<uint8_t *>()[0],
+            .clip = command.GetData<uint8_t *>()[1],
           };
           this->media_player_.Set(this->sqeuence_, media_player);
           break;
@@ -388,8 +389,8 @@ void Atem::task_() {
           event << Event::kVersion;
 
           const ProtocolVersion version = {
-              .major = command.GetDataS<uint16_t>(0),
-              .minor = command.GetDataS<uint16_t>(1),
+            .major = command.GetDataS<uint16_t>(0),
+            .minor = command.GetDataS<uint16_t>(1),
           };
           this->version_.Set(this->sqeuence_, version);
           break;
@@ -397,8 +398,8 @@ void Atem::task_() {
         case ATEM_CMD("_pin"): {  // Product Id
           event << Event::kPid;
           memcpy(
-              this->product_id_, command.GetData<char *>(),
-              sizeof(this->product_id_)
+            this->product_id_, command.GetData<char *>(),
+            sizeof(this->product_id_)
           );
 
           len = strlen(command.GetData<char *>());
@@ -410,20 +411,20 @@ void Atem::task_() {
           event << Event::kTopology;
 
           const Topology top = {
-              .me = command.GetData(0),
-              .sources = command.GetData(1),
-              .dsk = command.GetData(2),
-              .aux = command.GetData(3),
-              .mixminus_outputs = command.GetData(4),
-              .mediaplayers = command.GetData(5),
-              .multiviewers = command.GetData(6),
-              .rs485 = command.GetData(7),
-              .hyperdecks = command.GetData(8),
-              .dve = command.GetData(9),
-              .stingers = command.GetData(10),
-              .supersources = command.GetData(11),
-              .talkback_channels = command.GetData(13),
-              .camera_control = command.GetData(18),
+            .me = command.GetData(0),
+            .sources = command.GetData(1),
+            .dsk = command.GetData(2),
+            .aux = command.GetData(3),
+            .mixminus_outputs = command.GetData(4),
+            .mediaplayers = command.GetData(5),
+            .multiviewers = command.GetData(6),
+            .rs485 = command.GetData(7),
+            .hyperdecks = command.GetData(8),
+            .dve = command.GetData(9),
+            .stingers = command.GetData(10),
+            .supersources = command.GetData(11),
+            .talkback_channels = command.GetData(13),
+            .camera_control = command.GetData(18),
           };
           topology_.Set(this->sqeuence_, top);
 
@@ -440,7 +441,7 @@ void Atem::task_() {
           if (this->aux_out_.size() <= channel) break;
 
           this->aux_out_[channel].Set(
-              this->sqeuence_, command.GetDataS<Source>(1)
+            this->sqeuence_, command.GetDataS<Source>(1)
           );
           break;
         }
@@ -450,8 +451,8 @@ void Atem::task_() {
           if (this->dsk_.size() <= keyer) break;
 
           const DskSource source = {
-              .fill = command.GetDataS<Source>(1),
-              .key = command.GetDataS<Source>(2),
+            .fill = command.GetDataS<Source>(1),
+            .key = command.GetDataS<Source>(2),
           };
           this->dsk_[keyer].source.Set(this->sqeuence_, source);
           break;
@@ -462,7 +463,7 @@ void Atem::task_() {
           if (this->dsk_.size() <= keyer) break;
 
           const DskProperties properties{
-              .tie = bool(command.GetData(1)),
+            .tie = bool(command.GetData(1)),
           };
           this->dsk_[keyer].properties.Set(this->sqeuence_, properties);
           break;
@@ -473,9 +474,9 @@ void Atem::task_() {
           if (this->dsk_.size() <= keyer) break;
 
           const DskState state = {
-              .on_air = bool(command.GetData(1)),
-              .in_transition = bool(command.GetData(2)),
-              .is_auto_transitioning = bool(command.GetData(3)),
+            .on_air = bool(command.GetData(1)),
+            .in_transition = bool(command.GetData(2)),
+            .is_auto_transitioning = bool(command.GetData(3)),
           };
           this->dsk_[keyer].state.Set(this->sqeuence_, state);
           break;
@@ -485,8 +486,8 @@ void Atem::task_() {
           me = command.GetData<uint8_t *>()[0];
 
           const FadeToBlack ftb = {
-              .fully_black = bool(command.GetData<uint8_t *>()[1]),
-              .in_transition = bool(command.GetData<uint8_t *>()[2]),
+            .fully_black = bool(command.GetData<uint8_t *>()[1]),
+            .in_transition = bool(command.GetData<uint8_t *>()[2]),
           };
 
           if (this->mix_effect_.size() <= me) break;
@@ -506,10 +507,10 @@ void Atem::task_() {
 
           // Copy name short
           len =
-              strnlen(command.GetData<char *>() + 22, sizeof(inpr.name_short));
+            strnlen(command.GetData<char *>() + 22, sizeof(inpr.name_short));
           memcpy(
-              inpr.name_short, command.GetData<uint8_t *>() + 22,
-              sizeof(inpr.name_short)
+            inpr.name_short, command.GetData<uint8_t *>() + 22,
+            sizeof(inpr.name_short)
           );
 
           // Store inpr
@@ -518,7 +519,7 @@ void Atem::task_() {
             (*it).second.Set(this->sqeuence_, inpr);
           } else {
             input_properties_.insert(
-                {source, AtemState(this->sqeuence_, inpr)}
+              {source, AtemState(this->sqeuence_, inpr)}
             );
           }
 
@@ -534,19 +535,19 @@ void Atem::task_() {
           if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
           const UskState state = {
-              .type = command.GetData<UskKeyerType>(2),  // 2
+            .type = command.GetData<UskKeyerType>(2),  // 2
 
-              .flying_key_enabled = command.GetData<bool>(5),  // 5
+            .flying_key_enabled = command.GetData<bool>(5),  // 5
 
-              .fill = command.GetDataS<Source>(3),  // 6-7
-              .key = command.GetDataS<Source>(4),   // 8-9
+            .fill = command.GetDataS<Source>(3),  // 6-7
+            .key = command.GetDataS<Source>(4),   // 8-9
 
-              .mask_enabled = command.GetData<bool>(10),  // 10
+            .mask_enabled = command.GetData<bool>(10),  // 10
 
-              .top = command.GetDataS<int16_t>(6),     // 12-13
-              .bottom = command.GetDataS<int16_t>(7),  // 14-15
-              .left = command.GetDataS<int16_t>(8),    // 16-17
-              .right = command.GetDataS<int16_t>(9),   // 18-19
+            .top = command.GetDataS<int16_t>(6),     // 12-13
+            .bottom = command.GetDataS<int16_t>(7),  // 14-15
+            .left = command.GetDataS<int16_t>(8),    // 16-17
+            .right = command.GetDataS<int16_t>(9),   // 18-19
           };
 
           this->mix_effect_[me].keyer[keyer].state.Set(this->sqeuence_, state);
@@ -562,15 +563,15 @@ void Atem::task_() {
           if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
           const DveState properties = {
-              .size_x = command.GetDataL<int>(1),
-              .size_y = command.GetDataL<int>(2),
-              .pos_x = command.GetDataL<int>(3),
-              .pos_y = command.GetDataL<int>(4),
-              .rotation = command.GetDataL<int>(5),
+            .size_x = command.GetDataL<int>(1),
+            .size_y = command.GetDataL<int>(2),
+            .pos_x = command.GetDataL<int>(3),
+            .pos_y = command.GetDataL<int>(4),
+            .rotation = command.GetDataL<int>(5),
           };
 
           this->mix_effect_[me].keyer[keyer].dve.Set(
-              this->sqeuence_, properties
+            this->sqeuence_, properties
           );
           break;
         }
@@ -584,7 +585,7 @@ void Atem::task_() {
           if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
           this->mix_effect_[me].keyer[keyer].at_key_frame.Set(
-              this->sqeuence_, command.GetData<uint8_t *>()[6]
+            this->sqeuence_, command.GetData<uint8_t *>()[6]
           );
           break;
         }
@@ -612,9 +613,9 @@ void Atem::task_() {
           if (this->media_player_source_.size() <= mediaplayer) break;
 
           const MediaPlayerSource source = {
-              .type = command.GetData(1),
-              .still_index = command.GetData(2),
-              .clip_index = command.GetData(3),
+            .type = command.GetData(1),
+            .still_index = command.GetData(2),
+            .clip_index = command.GetData(3),
           };
           this->media_player_source_[mediaplayer].Set(this->sqeuence_, source);
           break;
@@ -627,22 +628,21 @@ void Atem::task_() {
           if (type != 0) break;  // Only work with stills
           event << Event::kMediaPool;
 
-          const std::string name = is_used
-                                       ? std::string(
-                                             command.GetData<char *>() + 24,
-                                             command.GetData<uint8_t *>()[23]
-                                         )
-                                       : std::string();
+          const std::string name = is_used ? std::string(
+                                               command.GetData<char *>() + 24,
+                                               command.GetData<uint8_t *>()[23]
+                                             )
+                                           : std::string();
 
           // Check if vector is large enhough
           if (this->media_player_file_.size() <= index) {
             this->media_player_file_.resize(
-                index + 1, AtemState<std::string>()
+              index + 1, AtemState<std::string>()
             );
           }
 
           this->media_player_file_.at(index) =
-              AtemState(this->sqeuence_, std::move(name));
+            AtemState(this->sqeuence_, std::move(name));
           break;
         }
         case ATEM_CMD("PrgI"): {  // Program Input
@@ -651,7 +651,7 @@ void Atem::task_() {
 
           if (this->mix_effect_.size() <= me) break;
           this->mix_effect_[me].program.Set(
-              this->sqeuence_, command.GetDataS<Source>(1)
+            this->sqeuence_, command.GetDataS<Source>(1)
           );
           break;
         }
@@ -661,7 +661,7 @@ void Atem::task_() {
 
           if (this->mix_effect_.size() <= me) break;
           this->mix_effect_[me].preview.Set(
-              this->sqeuence_, command.GetDataS<Source>(1)
+            this->sqeuence_, command.GetDataS<Source>(1)
           );
           break;
         }
@@ -669,7 +669,7 @@ void Atem::task_() {
           if (command.GetLength() != 12) continue;
           event << Event::kStream;
           this->stream_.Set(
-              this->sqeuence_, (StreamState)(command.GetData<uint8_t *>()[1])
+            this->sqeuence_, (StreamState)(command.GetData<uint8_t *>()[1])
           );
           break;
         }
@@ -680,11 +680,11 @@ void Atem::task_() {
           if (this->mix_effect_.size() <= me) break;
 
           const TransitionPosition position = {
-              .in_transition = (bool)(command.GetData(1) & 0x01),
-              .position = command.GetDataS<uint16_t>(2),
+            .in_transition = (bool)(command.GetData(1) & 0x01),
+            .position = command.GetDataS<uint16_t>(2),
           };
           this->mix_effect_[me].transition.position.Set(
-              this->sqeuence_, position
+            this->sqeuence_, position
           );
           break;
         }
@@ -695,8 +695,8 @@ void Atem::task_() {
           if (this->mix_effect_.size() <= me) break;
 
           const TransitionState state = {
-              .style = static_cast<TransitionStyle>(command.GetData(1)),
-              .next = command.GetData(2),
+            .style = static_cast<TransitionStyle>(command.GetData(1)),
+            .next = command.GetData(2),
           };
           this->mix_effect_[me].transition.state.Set(this->sqeuence_, state);
           break;
@@ -790,13 +790,13 @@ esp_err_t Atem::SendCommands(std::span<const AtemCommand::UPtr> commands) {
 
 esp_err_t Atem::SendPacket_(const AtemPacket *packet) {
   ESP_LOG_BUFFER_HEXDUMP(
-      TAG, packet->GetData(), packet->GetLength(), ESP_LOG_VERBOSE
+    TAG, packet->GetData(), packet->GetLength(), ESP_LOG_VERBOSE
   );
 
   ESP_LOGD(
-      TAG, "-> Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
-      packet->GetFlags(), packet->GetAckId(), packet->GetResendId(),
-      packet->GetId(), packet->GetLength()
+    TAG, "-> Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
+    packet->GetFlags(), packet->GetAckId(), packet->GetResendId(),
+    packet->GetId(), packet->GetLength()
   );
 
   int len = send(this->sockfd_, packet->GetData(), packet->GetLength(), 0);
@@ -851,6 +851,19 @@ void Atem::Reconnect_() {
   AtemPacket p = AtemPacket(0x2, this->session_id_, 20);
   ((uint8_t *)p.GetData())[12] = 0x01;
   this->SendPacket_(&p);
+}
+
+bool Atem::IsAfterInitPacket_(const AtemPacket &packet) {
+  if (packet.GetLength() == 12 && packet.GetFlags() & 0x1)
+    return true;  // Is ACK packet
+
+  if (packet.GetLength() == 28) {
+    if (memcmp(((const char *)packet.GetData()) + 16, "Time", 4) == 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }  // namespace atem

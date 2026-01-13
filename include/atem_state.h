@@ -21,10 +21,10 @@ namespace atem {
 template <typename T>
 class AtemState {
  public:
-  AtemState(const SequenceCheck& sequence, const T& state)
+  AtemState(const SequenceCheck &sequence, const T &state)
       : last_change_id_(sequence.GetLastId()), state_(state) {}
 
-  AtemState(const T& state = T()) : last_change_id_(INT16_MIN), state_(state) {}
+  AtemState(const T &state = T()) : last_change_id_(INT16_MIN), state_(state) {}
 
   ~AtemState() = default;
 
@@ -32,12 +32,12 @@ class AtemState {
     return this->last_change_id_ == id;
   }
 
-  inline bool operator<(const AtemState<T>& rhs) const {
+  inline bool operator<(const AtemState<T> &rhs) const {
     return this.last_change_id_ < rhs.last_change_id_;
   }
 
-  inline const T& operator*() const { return this->state_; }
-  inline const T* operator->() const { return std::addressof(this->state_); }
+  inline const T &operator*() const { return this->state_; }
+  inline const T *operator->() const { return std::addressof(this->state_); }
 
   inline operator bool() const { return this->IsValid(); }
 
@@ -48,6 +48,7 @@ class AtemState {
    * @return false
    */
   inline bool IsValid() const { return this->last_change_id_ != INT16_MIN; }
+
   /**
    * @brief Returns true when the packet id is newer (or the same) as the last
    * change id of this state
@@ -63,25 +64,30 @@ class AtemState {
     if (id == 0) return true;
     return this->last_change_id_ > 0 && id <= this->last_change_id_;
   }
+
   /**
    * @brief Returns a reference to the state.
    *
    * @return const T&
    */
-  inline const T& Get() const { return this->state_; }
+  inline const T &Get() const { return this->state_; }
+
   /**
    * @brief Set the state to a new value. It will only be changed
    *
-   * @param id[in] The packet id of the ATEM when this change has been made
-   * @param state[in] The new state
+   * @param [in] sequence The packet id of the ATEM when this change has been
+   * made
+   * @param [in] state The new state
    * @return bool This returns true when the state has been changed.
    */
-  bool Set(const SequenceCheck& sequence, const T& state) {
+  bool Set(const SequenceCheck &sequence, const T &state) {
     // Check if the current data is newer
     if (sequence.IsNewer(this->last_change_id_)) {
 #if CONFIG_COMPILER_CXX_RTTI
-      ESP_LOGD("AtemState", "%s: %u > %u", typeid(T).name(),
-               this->last_change_id_, sequence.GetLastId());
+      ESP_LOGD(
+        "AtemState", "%s: %u > %u", typeid(T).name(), this->last_change_id_,
+        sequence.GetLastId()
+      );
 #endif
       return false;
     }
@@ -90,11 +96,13 @@ class AtemState {
     this->state_ = state;
     return true;
   }
+
   /**
    * @brief This will "reset" the last change id. This can be executed when a
    * rollover has happened.
    */
   inline void ResetLastChangeId() { this->last_change_id_ = INT16_MIN + 1; }
+
   /**
    * @brief Returns the packet id when this state was last changed.
    *

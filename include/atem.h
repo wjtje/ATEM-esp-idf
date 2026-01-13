@@ -260,7 +260,7 @@ class Atem {
    * @return Weather or not the variable is valid
    */
   bool GetMediaPlayerSource(
-      uint8_t mediaplayer, MediaPlayerSource &state
+    uint8_t mediaplayer, MediaPlayerSource &state
   ) const;
 
   /**
@@ -375,10 +375,10 @@ class Atem {
    */
   esp_err_t SendCommands(std::span<const AtemCommand::UPtr> commands);
   inline esp_err_t SendCommands(
-      std::initializer_list<const AtemCommand::UPtr> commands
+    std::initializer_list<const AtemCommand::UPtr> commands
   ) {
     return SendCommands(
-        std::span<const AtemCommand::UPtr>(commands.begin(), commands.end())
+      std::span<const AtemCommand::UPtr>(commands.begin(), commands.end())
     );
   }
 
@@ -437,6 +437,18 @@ class Atem {
    * @brief Close current connection, Reset variables, and send INIT request.
    */
   void Reconnect_();
+
+  /**
+   * @brief Returns true if the packet is a generic packet send after all init
+   * packets
+   * - An ACK packet
+   * - A packet only containing a Time command
+   *
+   * @param [in] packet
+   * @return true
+   * @return false
+   */
+  bool IsAfterInitPacket_(const AtemPacket &packet);
 };
 
 }  // namespace atem
