@@ -183,7 +183,7 @@ void Atem::task_() {
       continue;
     }
 
-    ESP_LOGI(
+    ESP_LOGD(
       TAG, "<- Flags: %02X, ACK: %04X, Resend: %04X, Id: %04X, Len: %u",
       packet.GetFlags(), packet.GetAckId(), packet.GetResendId(),
       packet.GetId(), packet.GetLength()
