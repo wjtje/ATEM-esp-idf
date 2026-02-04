@@ -1,5 +1,7 @@
 #include "atem.h"
 
+#include <utility>
+
 namespace atem {
 
 static const char *TAG{"Atem"};
@@ -10,9 +12,10 @@ inline void operator<<(uint32_t &lhs, const Event &rhs) {
 
 // MARK: Constructor and deconstructor
 
-Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
+Atem::Atem(const char *address, EventCb event_cb)
+    : event_cb_(std::move(event_cb)) {
   // Try to create a socket
-  struct addrinfo hints, *servinfo, *p;
+  struct addrinfo hints{}, *servinfo, *p;
   int rv;
 
   memset(&hints, 0, sizeof(hints));
@@ -24,7 +27,7 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
     return;
   }
 
-  for (p = servinfo; p != NULL; p = p->ai_next) {
+  for (p = servinfo; p != nullptr; p = p->ai_next) {
     if ((this->sockfd_ =
            socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
       continue;
@@ -40,7 +43,7 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
     break;
   }
 
-  if (p == NULL) {
+  if (p == nullptr) {
     ESP_LOGE(TAG, "Failed to connect to ATEM");
     return;
   }
@@ -48,9 +51,7 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
   freeaddrinfo(servinfo);
 
   // Set socket timeout
-  struct timeval timeout;
-  timeout.tv_sec = 1;
-  timeout.tv_usec = 0;
+  struct timeval timeout{.tv_sec = 1, .tv_usec = 0};
   if ((rv = setsockopt(
          this->sockfd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout
        )) != 0) {
@@ -69,8 +70,8 @@ Atem::Atem(const char *address, EventCb event_cb) : event_cb_(event_cb) {
 
   // Create background task
   if (unlikely(!xTaskCreate(
-        [](void *a) { ((Atem *)a)->task_(); }, "atem", 5 * 1024, this,
-        configMAX_PRIORITIES - 1, &this->task_handle_
+        [](void *a) { static_cast<Atem *>(a)->task_(); }, "atem", 5 * 1024,
+        this, configMAX_PRIORITIES - 1, &this->task_handle_
       ))) {
     ESP_LOGE(TAG, "Failed to create task");
     return;
@@ -87,7 +88,7 @@ Atem::~Atem() {
   // Clear cached packages
 #if CONFIG_ATEM_STORE_SEND
   xSemaphoreTake(this->send_mutex_, portMAX_DELAY);
-  for (auto p : this->send_packets_) delete p;
+  for (const auto p : this->send_packets_) delete p;
   this->send_packets_.clear();
   xSemaphoreGive(this->send_mutex_);
 #endif
@@ -147,10 +148,10 @@ void Atem::task_() {
 
       // Send ACK-RESPONSE to test connection
       if (this->Connected()) {
-        AtemPacket p = AtemPacket(0x11, this->session_id_, 12);
+        auto p = AtemPacket(0x11, this->session_id_, 12);
         p.SetId(++this->local_id_);
         p.SetAckId(this->remote_id_);
-        this->SendPacket_(&p);
+        (void)this->SendPacket_(&p);
       }
 
       ack_count++;
@@ -202,16 +203,19 @@ void Atem::task_() {
     // INIT packet
     if (packet.GetFlags() & 0x2 && this->state_ != ConnectionState::kActive) {
       ESP_LOGD(TAG, "Received INIT");
-      uint8_t init_status = ((const uint8_t *)packet.GetData())[12];
 
-      if (init_status == 0x2) {  // INIT accepted
+      if (uint8_t init_status =
+            static_cast<const uint8_t *>(packet.GetData())[12];
+          init_status == 0x2) {
+        // INIT accepted
         this->local_id_ = 0;
         this->remote_id_ = 0;
         this->state_ = ConnectionState::kInitializing;
         boot_events = 0;
-        AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
-        this->SendPacket_(&p);
-      } else if (init_status == 0x3) {  // No connection available
+        auto p = AtemPacket(0x10, packet.GetSessionId(), 12);
+        (void)this->SendPacket_(&p);
+      } else if (init_status == 0x3) {
+        // No connection available
         ESP_LOGW(
           TAG,
           "Couldn't connect to the atem because it has no connection "
@@ -250,7 +254,7 @@ void Atem::task_() {
           if (i++ > 50) break;  // Limit to max 50 loops
 
           if (p->GetId() == id) {
-            this->SendPacket_(p);
+            (void)this->SendPacket_(p);
             send = true;
             break;
           }
@@ -262,9 +266,9 @@ void Atem::task_() {
 
       // We don't have this packet, just pretend it was an ACK
       if (!send) {
-        AtemPacket p = AtemPacket(0x1, packet.GetSessionId(), 12);
+        auto p = AtemPacket(0x1, packet.GetSessionId(), 12);
         p.SetId(packet.GetResendId());
-        this->SendPacket_(&p);
+        (void)this->SendPacket_(&p);
       }
     }
 
@@ -273,10 +277,10 @@ void Atem::task_() {
       this->remote_id_ = packet.GetId();
       bool should_parse_packet = true;
 
-      AtemPacket p = AtemPacket(0x10, packet.GetSessionId(), 12);
+      auto p = AtemPacket(0x10, packet.GetSessionId(), 12);
       p.SetAckId(this->remote_id_);
 
-      if (!this->sqeuence_.Add(packet.GetId())) {
+      if (!this->sequence_.Add(packet.GetId())) {
         ESP_LOGD(TAG, "Received duplicate packet with id %u", packet.GetId());
         should_parse_packet = false;  // We can ignore this packet
       }
@@ -295,7 +299,7 @@ void Atem::task_() {
       // }
 
       if (state_ == ConnectionState::kActive) {  // || missing_id >= 0
-        this->SendPacket_(&p);
+        (void)this->SendPacket_(&p);
       }
 
       if (!should_parse_packet) continue;
@@ -308,8 +312,7 @@ void Atem::task_() {
         int16_t id = packet.GetAckId();
         int i = 0;
 
-        for (std::vector<AtemPacket *>::iterator it =
-               this->send_packets_.begin();
+        for (auto it = this->send_packets_.begin();
              it != this->send_packets_.end();) {
           if (i++ > 50) break;  // Limit to max 50 loops
 
@@ -373,7 +376,7 @@ void Atem::task_() {
             .still = command.GetData<uint8_t *>()[0],
             .clip = command.GetData<uint8_t *>()[1],
           };
-          this->media_player_.Set(this->sqeuence_, media_player);
+          this->media_player_.Set(this->sequence_, media_player);
           break;
         }
         case ATEM_CMD("_MeC"): {  // Mix Effect Config
@@ -392,7 +395,7 @@ void Atem::task_() {
             .major = command.GetDataS<uint16_t>(0),
             .minor = command.GetDataS<uint16_t>(1),
           };
-          this->version_.Set(this->sqeuence_, version);
+          this->version_.Set(this->sequence_, version);
           break;
         }
         case ATEM_CMD("_pin"): {  // Product Id
@@ -426,7 +429,7 @@ void Atem::task_() {
             .talkback_channels = command.GetData(13),
             .camera_control = command.GetData(18),
           };
-          topology_.Set(this->sqeuence_, top);
+          topology_.Set(this->sequence_, top);
 
           // Resize buffers
           this->mix_effect_.resize(top.me);
@@ -441,7 +444,7 @@ void Atem::task_() {
           if (this->aux_out_.size() <= channel) break;
 
           this->aux_out_[channel].Set(
-            this->sqeuence_, command.GetDataS<Source>(1)
+            this->sequence_, command.GetDataS<Source>(1)
           );
           break;
         }
@@ -454,7 +457,7 @@ void Atem::task_() {
             .fill = command.GetDataS<Source>(1),
             .key = command.GetDataS<Source>(2),
           };
-          this->dsk_[keyer].source.Set(this->sqeuence_, source);
+          this->dsk_[keyer].source.Set(this->sequence_, source);
           break;
         }
         case ATEM_CMD("DskP"): {  // DSK Properties
@@ -463,9 +466,9 @@ void Atem::task_() {
           if (this->dsk_.size() <= keyer) break;
 
           const DskProperties properties{
-            .tie = bool(command.GetData(1)),
+            .tie = static_cast<bool>(command.GetData(1)),
           };
-          this->dsk_[keyer].properties.Set(this->sqeuence_, properties);
+          this->dsk_[keyer].properties.Set(this->sequence_, properties);
           break;
         }
         case ATEM_CMD("DskS"): {  // DSK State
@@ -474,11 +477,11 @@ void Atem::task_() {
           if (this->dsk_.size() <= keyer) break;
 
           const DskState state = {
-            .on_air = bool(command.GetData(1)),
-            .in_transition = bool(command.GetData(2)),
-            .is_auto_transitioning = bool(command.GetData(3)),
+            .on_air = static_cast<bool>(command.GetData(1)),
+            .in_transition = static_cast<bool>(command.GetData(2)),
+            .is_auto_transitioning = static_cast<bool>(command.GetData(3)),
           };
-          this->dsk_[keyer].state.Set(this->sqeuence_, state);
+          this->dsk_[keyer].state.Set(this->sequence_, state);
           break;
         }
         case ATEM_CMD("FtbS"): {  // Fade to black State
@@ -486,19 +489,19 @@ void Atem::task_() {
           me = command.GetData<uint8_t *>()[0];
 
           const FadeToBlack ftb = {
-            .fully_black = bool(command.GetData<uint8_t *>()[1]),
-            .in_transition = bool(command.GetData<uint8_t *>()[2]),
+            .fully_black = static_cast<bool>(command.GetData<uint8_t *>()[1]),
+            .in_transition = static_cast<bool>(command.GetData<uint8_t *>()[2]),
           };
 
           if (this->mix_effect_.size() <= me) break;
-          this->mix_effect_[me].ftb.Set(this->sqeuence_, ftb);
+          this->mix_effect_[me].ftb.Set(this->sequence_, ftb);
           break;
         }
         case ATEM_CMD("InPr"): {  // Input Property
           event << Event::kInpr;
           source = command.GetDataS<Source>(0);
 
-          InputProperty inpr;
+          InputProperty inpr{};
           memset(&inpr, 0, sizeof(inpr));
 
           // Copy name long
@@ -514,12 +517,12 @@ void Atem::task_() {
           );
 
           // Store inpr
-          auto it = input_properties_.find(source);
-          if (it != this->input_properties_.end()) {
-            (*it).second.Set(this->sqeuence_, inpr);
+          if (auto it = input_properties_.find(source);
+              it != this->input_properties_.end()) {
+            it->second.Set(this->sequence_, inpr);
           } else {
             input_properties_.insert(
-              {source, AtemState(this->sqeuence_, inpr)}
+              {source, AtemState(this->sequence_, inpr)}
             );
           }
 
@@ -550,7 +553,7 @@ void Atem::task_() {
             .right = command.GetDataS<int16_t>(9),   // 18-19
           };
 
-          this->mix_effect_[me].keyer[keyer].state.Set(this->sqeuence_, state);
+          this->mix_effect_[me].keyer[keyer].state.Set(this->sequence_, state);
           break;
         }
         case ATEM_CMD("KeDV"): {  // Usk properties DVE
@@ -571,7 +574,7 @@ void Atem::task_() {
           };
 
           this->mix_effect_[me].keyer[keyer].dve.Set(
-            this->sqeuence_, properties
+            this->sequence_, properties
           );
           break;
         }
@@ -585,7 +588,7 @@ void Atem::task_() {
           if (this->mix_effect_[me].keyer.size() <= keyer) break;
 
           this->mix_effect_[me].keyer[keyer].at_key_frame.Set(
-            this->sqeuence_, command.GetData<uint8_t *>()[6]
+            this->sequence_, command.GetData<uint8_t *>()[6]
           );
           break;
         }
@@ -604,7 +607,7 @@ void Atem::task_() {
           state &= ~(0x1 << keyer);
           state |= (command.GetData<uint8_t *>()[2] << keyer);
 
-          usk_on_air.Set(this->sqeuence_, state);
+          usk_on_air.Set(this->sequence_, state);
           break;
         }
         case ATEM_CMD("MPCE"): {  // Media Player Source
@@ -617,12 +620,12 @@ void Atem::task_() {
             .still_index = command.GetData(2),
             .clip_index = command.GetData(3),
           };
-          this->media_player_source_[mediaplayer].Set(this->sqeuence_, source);
+          this->media_player_source_[mediaplayer].Set(this->sequence_, source);
           break;
         }
         case ATEM_CMD("MPfe"): {  // Media Pool Frame Description
-          uint8_t type = command.GetData<uint8_t *>()[0];
-          uint16_t index = command.GetDataS<uint16_t>(1);
+          auto type = command.GetData<uint8_t *>()[0];
+          auto index = command.GetDataS<uint16_t>(1);
           bool is_used = command.GetData<uint8_t *>()[4];
 
           if (type != 0) break;  // Only work with stills
@@ -641,8 +644,7 @@ void Atem::task_() {
             );
           }
 
-          this->media_player_file_.at(index) =
-            AtemState(this->sqeuence_, std::move(name));
+          this->media_player_file_.at(index) = AtemState(this->sequence_, name);
           break;
         }
         case ATEM_CMD("PrgI"): {  // Program Input
@@ -651,7 +653,7 @@ void Atem::task_() {
 
           if (this->mix_effect_.size() <= me) break;
           this->mix_effect_[me].program.Set(
-            this->sqeuence_, command.GetDataS<Source>(1)
+            this->sequence_, command.GetDataS<Source>(1)
           );
           break;
         }
@@ -661,7 +663,7 @@ void Atem::task_() {
 
           if (this->mix_effect_.size() <= me) break;
           this->mix_effect_[me].preview.Set(
-            this->sqeuence_, command.GetDataS<Source>(1)
+            this->sequence_, command.GetDataS<Source>(1)
           );
           break;
         }
@@ -669,7 +671,8 @@ void Atem::task_() {
           if (command.GetLength() != 12) continue;
           event << Event::kStream;
           this->stream_.Set(
-            this->sqeuence_, (StreamState)(command.GetData<uint8_t *>()[1])
+            this->sequence_,
+            static_cast<StreamState>(command.GetData<uint8_t *>()[1])
           );
           break;
         }
@@ -680,11 +683,11 @@ void Atem::task_() {
           if (this->mix_effect_.size() <= me) break;
 
           const TransitionPosition position = {
-            .in_transition = (bool)(command.GetData(1) & 0x01),
+            .in_transition = static_cast<bool>(command.GetData(1) & 0x01),
             .position = command.GetDataS<uint16_t>(2),
           };
           this->mix_effect_[me].transition.position.Set(
-            this->sqeuence_, position
+            this->sequence_, position
           );
           break;
         }
@@ -698,9 +701,11 @@ void Atem::task_() {
             .style = static_cast<TransitionStyle>(command.GetData(1)),
             .next = command.GetData(2),
           };
-          this->mix_effect_[me].transition.state.Set(this->sqeuence_, state);
+          this->mix_effect_[me].transition.state.Set(this->sequence_, state);
           break;
         }
+        default:
+          break;
       }
     }
 
@@ -740,7 +745,7 @@ esp_err_t Atem::SendCommands(std::span<const AtemCommand::UPtr> commands) {
   ESP_LOGD(TAG, "Sending %u commands (%u bytes)", amount, length);
 
   // Create the packet
-  AtemPacket *packet = new AtemPacket(0x1, this->session_id_, length);
+  auto *packet = new AtemPacket(0x1, this->session_id_, length);
   packet->SetId(++this->local_id_);
 
   // Copy commands into packet
@@ -748,7 +753,10 @@ esp_err_t Atem::SendCommands(std::span<const AtemCommand::UPtr> commands) {
   for (auto &c : commands) {
     if (unlikely(c == nullptr)) continue;
     c->PrepairCommand(this->version_.Get());
-    memcpy((uint8_t *)packet->GetData() + i, c->GetRawData(), c->GetLength());
+    memcpy(
+      static_cast<uint8_t *>(packet->GetData()) + i, c->GetRawData(),
+      c->GetLength()
+    );
     i += c->GetLength();
   }
 
@@ -788,7 +796,7 @@ esp_err_t Atem::SendCommands(std::span<const AtemCommand::UPtr> commands) {
 
 // MARK: Private functions
 
-esp_err_t Atem::SendPacket_(const AtemPacket *packet) {
+esp_err_t Atem::SendPacket_(const AtemPacket *packet) const {
   ESP_LOG_BUFFER_HEXDUMP(
     TAG, packet->GetData(), packet->GetLength(), ESP_LOG_VERBOSE
   );
@@ -817,7 +825,7 @@ void Atem::Reconnect_() {
   this->local_id_ = 0;
   this->remote_id_ = 0;
   this->session_id_ = 0x0B06;
-  this->sqeuence_ = SequenceCheck();
+  this->sequence_ = SequenceCheck();
 
   // Clear state
   xSemaphoreTake(this->state_mutex_, portMAX_DELAY);
@@ -848,9 +856,9 @@ void Atem::Reconnect_() {
   }
 
   // Send init request
-  AtemPacket p = AtemPacket(0x2, this->session_id_, 20);
-  ((uint8_t *)p.GetData())[12] = 0x01;
-  this->SendPacket_(&p);
+  auto p = AtemPacket(0x2, this->session_id_, 20);
+  static_cast<uint8_t *>(p.GetData())[12] = 0x01;
+  (void)this->SendPacket_(&p);
 }
 
 bool Atem::IsAfterInitPacket_(const AtemPacket &packet) {
@@ -858,7 +866,8 @@ bool Atem::IsAfterInitPacket_(const AtemPacket &packet) {
     return true;  // Is ACK packet
 
   if (packet.GetLength() == 28) {
-    if (memcmp(((const char *)packet.GetData()) + 16, "Time", 4) == 0) {
+    if (memcmp(static_cast<const char *>(packet.GetData()) + 16, "Time", 4) ==
+        0) {
       return true;
     }
   }

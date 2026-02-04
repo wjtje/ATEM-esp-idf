@@ -8,13 +8,10 @@
  */
 #pragma once
 #include <lwip/inet.h>
-#include <stdint.h>
-#include <stdlib.h>
 
 #include <initializer_list>
 #include <memory>
 #include <optional>
-#include <tuple>
 #include <utility>
 
 #include "atem_types.h"
@@ -26,7 +23,7 @@
 namespace atem {
 
 /**
- * @brief Base class of all commands that can be send to the ATEM.
+ * @brief Base class of all commands that can be sent to the ATEM.
  *
  */
 class AtemCommand {
@@ -62,12 +59,12 @@ class AtemCommand {
    *
    * This will automaticly be executes when sending commands.
    *
-   * @param version
+   * @param ver
    */
   virtual void PrepairCommand(const ProtocolVersion &ver) {}
 
   /**
-   * @brief Get the length of the command, this include the 8 bytes for the
+   * @brief Get the length of the command, this includes the 8 bytes for the
    * header
    *
    * @return uint16_t
@@ -548,14 +545,14 @@ class UskOnAir : public AtemCommand {
    * @param [in] keyer Which Upstream Keyer to perform this action on
    * @param [in] enabled The new state of the USK
    */
-  UskOnAir(uint8_t me, uint8_t key, bool enabled) : AtemCommand("CKOn", 12) {
+  UskOnAir(uint8_t me, uint8_t keyer, bool enabled) : AtemCommand("CKOn", 12) {
     GetData<uint8_t *>()[0] = me;
-    GetData<uint8_t *>()[1] = key;
+    GetData<uint8_t *>()[1] = keyer;
     GetData<uint8_t *>()[2] = enabled;
   }
 
-  static UPtr Create(uint8_t me, uint8_t key, bool enabled) {
-    return UPtr(new UskOnAir(me, key, enabled));
+  static UPtr Create(uint8_t me, uint8_t keyer, bool enabled) {
+    return UPtr(new UskOnAir(me, keyer, enabled));
   }
 };
 

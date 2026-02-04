@@ -6,22 +6,18 @@
  * @copyright Copyright (c) 2023 - Wouter (wjtje)
  */
 #pragma once
-#include <arpa/inet.h>
 #include <esp_event.h>
 #include <esp_log.h>
 #include <freertos/task.h>
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
 
-#include <array>
 #include <cmath>
 #include <functional>
 #include <initializer_list>
 #include <map>
-#include <optional>
 #include <span>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "atem_command.h"
@@ -35,7 +31,7 @@ namespace atem {
 /**
  * @brief Atem events
  *
- * Events are commands clusted by type, so it's easer to consume (that's my
+ * Events are commands clustered by type, so it's easer to consume (that's my
  * opinion).
  */
 enum class Event : int32_t {
@@ -115,7 +111,7 @@ class Atem {
   Atem(const char *address, EventCb event_cb);
   ~Atem();
 
-  const ip4_addr_t *GetAddress() const { return &address_; };
+  [[nodiscard]] const ip4_addr_t *GetAddress() const { return &address_; };
 
   /**
    * @brief Get the State Mutex
@@ -125,7 +121,9 @@ class Atem {
    *
    * @return SemaphoreHandle_t
    */
-  SemaphoreHandle_t GetStateMutex() const { return this->state_mutex_; }
+  [[nodiscard]] SemaphoreHandle_t GetStateMutex() const {
+    return this->state_mutex_;
+  }
 
   /**
    * @brief Returns approximately the amount of bytes used by all the internal
@@ -133,7 +131,7 @@ class Atem {
    *
    * @return size_t
    */
-  size_t GetSize() const;
+  [[nodiscard]] size_t GetSize() const;
 
   // MARK: Direct state
 
@@ -144,28 +142,29 @@ class Atem {
    *
    * @return const std::map<Source, InputProperty> &
    */
-  const std::map<Source, AtemState<InputProperty>> &GetInputProperties() const {
+  [[nodiscard]] const std::map<Source, AtemState<InputProperty>> &
+  GetInputProperties() const {
     return this->input_properties_;
   }
 
-  const std::vector<Dsk> &GetDsk() const { return this->dsk_; }
-  const std::vector<MixEffect> &GetMixEffect() const {
+  [[nodiscard]] const std::vector<Dsk> &GetDsk() const { return this->dsk_; }
+  [[nodiscard]] const std::vector<MixEffect> &GetMixEffect() const {
     return this->mix_effect_;
   }
-  const std::vector<AtemState<MediaPlayerSource>> &
+  [[nodiscard]] const std::vector<AtemState<MediaPlayerSource>> &
   GetMediaPlayerSources() const {
     return this->media_player_source_;
   }
 
   /**
-   * @brief Get all sources that are currently displayed on a aux channel
+   * @brief Get all sources that are currently displayed on an aux channel
    *
-   * @warning This can be null, length can be determented using GetTopology
+   * @warning This can be null, length can be determined using GetTopology
    * @warning Make sure your task has ownership over the atem state
    *
    * @return Source*
    */
-  const std::vector<AtemState<Source>> &GetAuxOutputs() const {
+  [[nodiscard]] const std::vector<AtemState<Source>> &GetAuxOutputs() const {
     return this->aux_out_;
   }
 
@@ -176,11 +175,11 @@ class Atem {
    *
    * @return const std::map<uint16_t, char*> {index, file name}
    */
-  const auto &GetMediaPlayerFileName() const {
+  [[nodiscard]] const auto &GetMediaPlayerFileName() const {
     return this->media_player_file_;
   }
 
-  // MARK: Parced state
+  // MARK: Parsed state
 
   /**
    * @brief Returns if the atem connection is active or not
@@ -188,7 +187,9 @@ class Atem {
    * @return true The connection is active.
    * @return false The connection isn't active
    */
-  bool Connected() const { return this->state_ == ConnectionState::kActive; }
+  [[nodiscard]] bool Connected() const {
+    return this->state_ == ConnectionState::kActive;
+  }
   /**
    * @brief Get the source that's currently displayed of the aux channel. It
    * will return false when it's invalid.
@@ -204,10 +205,13 @@ class Atem {
    *
    * @param [in] keyer Which keyer to use
    * @param [out] state A variable that the state will be stored in
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskState(uint8_t keyer, DskState &state) const;
+  bool GetDskState(
+    uint8_t keyer, DskState &state, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the current fill and key source of a DSK
    *
@@ -246,21 +250,21 @@ class Atem {
    * @brief Get information about how many stills and clip the media player can
    * hold
    *
-   * @param player[out] A variable that will store the result
+   * @param [out] state A variable that will store the result
    *
    * @return Weather or not the variable is valid
    */
   bool GetMediaPlayer(MediaPlayer &state) const;
   /**
-   * @brief Get the access to the active source on a specific mediaplayer
+   * @brief Get the access to the active source on a specific media player
    *
-   * @param [in] mediaplayer The media player to get the state from
+   * @param [in] media_player The media player to get the state from
    * @param [out] state A variable that will hold the current state
    *
    * @return Weather or not the variable is valid
    */
   bool GetMediaPlayerSource(
-    uint8_t mediaplayer, MediaPlayerSource &state
+    uint8_t media_player, MediaPlayerSource &state
   ) const;
 
   /**
@@ -273,11 +277,11 @@ class Atem {
    */
   bool GetPreviewInput(uint8_t me, Source &source) const;
   /**
-   * @brief Get the Product Id (model) of the connected atem.
+   * @brief Get the Product ID (model) of the connected atem.
    *
    * @return const char*
    */
-  const char *GetProductId() const { return this->product_id_; }
+  [[nodiscard]] const char *GetProductId() const { return this->product_id_; }
   /**
    * @brief Get the current program source active on ME
    *
@@ -360,7 +364,7 @@ class Atem {
   bool GetUskDveState(uint8_t me, uint8_t keyer, DveState &state) const;
 
   /**
-   * @brief Send a list of commands to the ATEM, memory is automaticaly
+   * @brief Send a list of commands to the ATEM, memory is automatically
    * deallocated
    *
    * @code
@@ -369,13 +373,13 @@ class Atem {
    *  });
    * @endcode
    *
-   * @param commands[in]
+   * @param [in] commands
    *
-   * @return If the packet was send (added to queue) successfully
+   * @return If the packet was sent (added to queue) successfully
    */
   esp_err_t SendCommands(std::span<const AtemCommand::UPtr> commands);
   inline esp_err_t SendCommands(
-    std::initializer_list<const AtemCommand::UPtr> commands
+    const std::initializer_list<const AtemCommand::UPtr> commands
   ) {
     return SendCommands(
       std::span<const AtemCommand::UPtr>(commands.begin(), commands.end())
@@ -383,7 +387,7 @@ class Atem {
   }
 
  protected:
-  ip4_addr_t address_;
+  ip4_addr_t address_{};
   int sockfd_;
 
   // Connection state
@@ -394,14 +398,14 @@ class Atem {
     kActive
   };
   ConnectionState state_{ConnectionState::kNotConnected};
-  uint16_t session_id_;
-  uint16_t local_id_{0};
-  uint16_t remote_id_{0};
+  uint16_t session_id_{};
+  int16_t local_id_{0};
+  int16_t remote_id_{0};
 
   EventCb event_cb_;
 
   // Check missing packets
-  SequenceCheck sqeuence_;
+  SequenceCheck sequence_;
 
 #if CONFIG_ATEM_STORE_SEND
   // Packets send
@@ -432,7 +436,7 @@ class Atem {
    *
    * @param packet
    */
-  esp_err_t SendPacket_(const AtemPacket *packet);
+  esp_err_t SendPacket_(const AtemPacket *packet) const;
   /**
    * @brief Close current connection, Reset variables, and send INIT request.
    */
@@ -448,7 +452,7 @@ class Atem {
    * @return true
    * @return false
    */
-  bool IsAfterInitPacket_(const AtemPacket &packet);
+  static bool IsAfterInitPacket_(const AtemPacket &packet);
 };
 
 }  // namespace atem
