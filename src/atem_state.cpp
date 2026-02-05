@@ -2,7 +2,7 @@
 
 #ifdef CONFIG_ATEM_DEBUG_MUTEX_CHECK
 static const char *TAG{"AtemState"};
-#define ATEM_MUTEX_OWNER_CHECK()                                            \
+#define ATEM_MUTEX_OWNER_CHECK()                                           \
   if (xQueuePeek(this->state_mutex_, NULL, 0) == pdTRUE) {                 \
     char *task_name = pcTaskGetName(NULL);                                 \
     ESP_LOGE(                                                              \
@@ -13,7 +13,7 @@ static const char *TAG{"AtemState"};
   }
 #else
 #define ATEM_MUTEX_OWNER_CHECK() \
-  {                             \
+  {                              \
   }
 #endif
 
@@ -45,10 +45,12 @@ bool Atem::GetDskSource(uint8_t keyer, DskSource &source) const {
   return true;
 }
 
-bool Atem::GetDskProperties(uint8_t keyer, DskProperties &properties) const {
+bool Atem::GetDskProperties(
+  uint8_t keyer, DskProperties &properties, uint16_t packet_id
+) const {
   ATEM_MUTEX_OWNER_CHECK();
   if (this->dsk_.size() <= keyer) return false;
-  if (!this->dsk_[keyer].properties.IsValid()) return false;
+  if (!this->dsk_[keyer].properties.IsNewer(packet_id)) return false;
   properties = this->dsk_[keyer].properties.Get();
   return true;
 }

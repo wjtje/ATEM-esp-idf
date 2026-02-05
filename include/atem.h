@@ -226,10 +226,13 @@ class Atem {
    *
    * @param [in] keyer Which keyer to use
    * @param [out] properties A variable that the state will be stored in
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskProperties(uint8_t keyer, DskProperties &properties) const;
+  bool GetDskProperties(
+    uint8_t keyer, DskProperties &properties, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the state of the Fade to black on a specific MixEffect.
    *

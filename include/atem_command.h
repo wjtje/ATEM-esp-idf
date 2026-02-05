@@ -294,7 +294,7 @@ class DskTie : public AtemCommand {
   }
 
   static UPtr Create(uint8_t keyer, bool state) {
-    return UPtr(DskTie(keyer, state));
+    return UPtr(new DskTie(keyer, state));
   }
 };
 
