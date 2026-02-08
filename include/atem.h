@@ -217,10 +217,13 @@ class Atem {
    *
    * @param [in] keyer Which keyer to use
    * @param [out] source A variable that the state will be stored in
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskSource(uint8_t keyer, DskSource &source) const;
+  bool GetDskSource(
+    uint8_t keyer, DskSource &source, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the properties of a DSK
    *

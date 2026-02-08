@@ -37,10 +37,12 @@ bool Atem::GetDskState(
   return true;
 }
 
-bool Atem::GetDskSource(uint8_t keyer, DskSource &source) const {
+bool Atem::GetDskSource(
+  uint8_t keyer, DskSource &source, uint16_t packet_id
+) const {
   ATEM_MUTEX_OWNER_CHECK();
   if (this->dsk_.size() <= keyer) return false;
-  if (!this->dsk_[keyer].source.IsValid()) return false;
+  if (!this->dsk_[keyer].source.IsNewer(packet_id)) return false;
   source = this->dsk_[keyer].source.Get();
   return true;
 }
