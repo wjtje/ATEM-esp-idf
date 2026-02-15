@@ -173,7 +173,8 @@ class Atem {
    *
    * @warning Make sure your task has ownership over the atem state
    *
-   * @return const std::map<uint16_t, char*> {index, file name}
+   * @return const std::vector<AtemState<std::string>> & where the index in the
+   * vector is the file index
    */
   [[nodiscard]] const auto &GetMediaPlayerFileName() const {
     return this->media_player_file_;
