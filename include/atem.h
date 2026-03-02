@@ -197,10 +197,13 @@ class Atem {
    *
    * @param [in] channel Which aux channel to use
    * @param [out] source A variable that the source will be stored in
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetAuxOutput(uint8_t channel, Source &source) const;
+  [[nodiscard]] bool GetAuxOutput(
+    uint8_t channel, Source &source, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the state of a DSK
    *
@@ -210,7 +213,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskState(
+  [[nodiscard]] bool GetDskState(
     uint8_t keyer, DskState &state, uint16_t packet_id = 0
   ) const;
   /**
@@ -222,7 +225,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskSource(
+  [[nodiscard]] bool GetDskSource(
     uint8_t keyer, DskSource &source, uint16_t packet_id = 0
   ) const;
   /**
@@ -234,7 +237,7 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetDskProperties(
+  [[nodiscard]] bool GetDskProperties(
     uint8_t keyer, DskProperties &properties, uint16_t packet_id = 0
   ) const;
   /**
@@ -242,47 +245,61 @@ class Atem {
    *
    * @param [in] me Which MixEffect to use
    * @param [out] state A variable that the state will be stored in
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetFtbState(uint8_t me, FadeToBlack &state) const;
+  [[nodiscard]] bool GetFtbState(
+    uint8_t me, FadeToBlack &state, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get information about the current stream state.
    *
-   * @param state[out] A variable that will store the result
+   * @param [out] state A variable that will store the result
+   * @param [in] packet_id Only return true when the data is newer that this id
+   *
    * @return Weather or not the variable is valid
    */
-  bool GetStreamState(StreamState &state) const;
+  [[nodiscard]] bool GetStreamState(
+    StreamState &state, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get information about how many stills and clip the media player can
    * hold
    *
    * @param [out] state A variable that will store the result
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayer(MediaPlayer &state) const;
+  [[nodiscard]] bool GetMediaPlayer(
+    MediaPlayer &state, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the access to the active source on a specific media player
    *
    * @param [in] media_player The media player to get the state from
    * @param [out] state A variable that will hold the current state
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetMediaPlayerSource(
-    uint8_t media_player, MediaPlayerSource &state
+  [[nodiscard]] bool GetMediaPlayerSource(
+    uint8_t media_player, MediaPlayerSource &state, uint16_t packet_id = 0
   ) const;
 
   /**
    * @brief Get the current preview source active on ME
    *
-   * @param [out] source A variable that the source will be stored in
    * @param [in] me Which ME to use
+   * @param [out] source A variable that the source will be stored in
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetPreviewInput(uint8_t me, Source &source) const;
+  [[nodiscard]] bool GetPreviewInput(
+    uint8_t me, Source &source, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the Product ID (model) of the connected atem.
    *
@@ -292,54 +309,74 @@ class Atem {
   /**
    * @brief Get the current program source active on ME
    *
+   * @param [in] me Which ME to use
+   * @param [out] source A variable that the source will be stored in
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProgramInput(uint8_t me, Source &source) const;
+  [[nodiscard]] bool GetProgramInput(
+    uint8_t me, Source &source, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the Protocol Version
    *
-   * @param version[out] A variable that will store the protocol version
+   * @param [out] version A variable that will store the protocol version
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetProtocolVersion(ProtocolVersion &version) const;
+  [[nodiscard]] bool GetProtocolVersion(
+    ProtocolVersion &version, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the topology of the connected ATEM
    *
-   * @param topology[out] A variable that will store the topology
+   * @param [out] topology A variable that will store the topology
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTopology(Topology &topology) const;
+  [[nodiscard]] bool GetTopology(
+    Topology &topology, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the information about the current transition state on a ME
    *
    * @param [out] state A variable that will store the current state
    * @param [in] me Which ME to use
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionState(uint8_t me, TransitionState &state) const;
+  [[nodiscard]] bool GetTransitionState(
+    uint8_t me, TransitionState &state, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the information about the current transition position on a ME
    *
    * @param [in] me Which ME to use
    * @param [out] position A variable that will store the current state
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetTransitionPosition(uint8_t me, TransitionPosition &position) const;
+  [[nodiscard]] bool GetTransitionPosition(
+    uint8_t me, TransitionPosition &position, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the Usk state
    *
    * @param [in] me Which MixEffect to use
    * @param [in] keyer Which keyer to use
    * @param [out] state A variable that will store the current state
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskState(uint8_t me, uint8_t keyer, UskState &state) const;
+  [[nodiscard]] bool GetUskState(
+    uint8_t me, uint8_t keyer, UskState &state, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the number of Usk on a given ME
    *
@@ -348,27 +385,33 @@ class Atem {
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskNumber(uint8_t me, uint8_t &count) const;
+  [[nodiscard]] bool GetUskNumber(uint8_t me, uint8_t &count) const;
   /**
    * @brief Get is a USK is on air
    *
    * @param [in] me Which MixEffect to use
    * @param [in] keyer Which keyer to use
    * @param [out] state A variable that will store the current state
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskOnAir(uint8_t me, uint8_t keyer, bool &state) const;
+  [[nodiscard]] bool GetUskOnAir(
+    uint8_t me, uint8_t keyer, bool &state, uint16_t packet_id = 0
+  ) const;
   /**
    * @brief Get the Usk Dve state
    *
    * @param [in] me Which MixEffect to use
    * @param [in] keyer Which keyer to use
    * @param [out] state A variable that will store the current state
+   * @param [in] packet_id Only return true when the data is newer that this id
    *
    * @return Weather or not the variable is valid
    */
-  bool GetUskDveState(uint8_t me, uint8_t keyer, DveState &state) const;
+  [[nodiscard]] bool GetUskDveState(
+    uint8_t me, uint8_t keyer, DveState &state, uint16_t packet_id = 0
+  ) const;
 
   /**
    * @brief Send a list of commands to the ATEM, memory is automatically
