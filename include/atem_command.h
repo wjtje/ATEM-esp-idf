@@ -448,6 +448,12 @@ class UskDveProperties : public AtemCommand {
     GetData<uint8_t *>()[4] = me;
     GetData<uint8_t *>()[5] = keyer;
   }
+
+  static UPtr Create(
+    uint8_t me, uint8_t keyer, const std::initializer_list<DveProperty> &p
+  ) {
+    return UPtr(new UskDveProperties(me, keyer, p));
+  }
 };
 
 class UskFill : public AtemCommand {
