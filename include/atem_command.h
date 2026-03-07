@@ -393,6 +393,15 @@ class UskDveKeyFrameProperties : public AtemCommand {
     GetData<uint8_t *>()[5] = keyer;
     GetData<uint8_t *>()[6] = std::to_underlying(key_frame);
   }
+
+  static UPtr Create(
+    uint8_t me,
+    uint8_t keyer,
+    UskDveKeyFrame key_frame,
+    const std::initializer_list<DveProperty> &p
+  ) {
+    return UPtr(new UskDveKeyFrameProperties(me, keyer, key_frame, p));
+  }
 };
 
 class UskDveRunFlyingKey : public AtemCommand {
@@ -417,6 +426,15 @@ class UskDveRunFlyingKey : public AtemCommand {
     GetData<uint8_t *>()[2] = keyer;
     GetData<uint8_t *>()[4] = std::to_underlying(key_frame);
     GetData<uint8_t *>()[5] = run_to_inf_i.value_or(0);
+  }
+
+  static UPtr Create(
+    uint8_t me,
+    uint8_t keyer,
+    UskDveKeyFrame key_frame,
+    std::optional<uint8_t> run_to_inf_i = std::nullopt
+  ) {
+    return UPtr(new UskDveRunFlyingKey(me, keyer, key_frame, run_to_inf_i));
   }
 };
 
