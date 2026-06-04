@@ -99,16 +99,17 @@ enum class Event : int32_t {
 
 class Atem {
  public:
-  using EventCb = std::function<void(Event, uint16_t)>;
+  using EventCb = std::function<void(Event, uint16_t, void *data)>;
 
   /**
    * @brief Create a new connection to the ATEM
    *
    * @param [in] address The address of the ATEM to connect to
    * @param [in] event_cb A callback function that will be executed when an
+   * @param [in] data_cb A pointer that is passed to the callback
    * internal event is created.
    */
-  Atem(const char *address, EventCb event_cb);
+  Atem(const char *address, EventCb event_cb = NULL, void *data_cb = NULL);
   ~Atem();
 
   [[nodiscard]] const ip4_addr_t *GetAddress() const { return &address_; };
@@ -453,6 +454,7 @@ class Atem {
   int16_t remote_id_{0};
 
   EventCb event_cb_;
+  void *data_cb_ = NULL;
 
   // Check missing packets
   SequenceCheck sequence_;
