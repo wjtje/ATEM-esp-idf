@@ -12,8 +12,8 @@ inline void operator<<(uint32_t &lhs, const Event &rhs) {
 
 // MARK: Constructor and deconstructor
 
-Atem::Atem(const char *address, EventCb event_cb)
-    : event_cb_(std::move(event_cb)) {
+Atem::Atem(const char *address, EventCb event_cb, void *data_cb)
+    : event_cb_(std::move(event_cb)), data_cb_(data_cb) {
   // Try to create a socket
   struct addrinfo hints{}, *servinfo, *p;
   int rv;
@@ -236,7 +236,7 @@ void Atem::task_() {
       // Send event's
       for (int32_t i = 0; i < sizeof(boot_events) * 8; i++) {
         if (boot_events & (1 << i)) {
-          event_cb_(static_cast<Event>(i), 1);
+          if(event_cb_) event_cb_(static_cast<Event>(i), 1, data_cb_);
         }
       }
     }
@@ -717,7 +717,7 @@ void Atem::task_() {
 
       for (int32_t i = 0; i < sizeof(event) * 8; i++) {
         if (event & (1 << i)) {
-          event_cb_(static_cast<Event>(i), packet_id);
+          if(event_cb_) event_cb_(static_cast<Event>(i), packet_id, data_cb_);
         }
       }
 
@@ -852,7 +852,7 @@ void Atem::Reconnect_() {
 
   // Send event that Product ID has changed
   if (was_connected) {
-    event_cb_(Event::kPid, 0);
+    if(event_cb_) event_cb_(Event::kPid, 0, data_cb_);
   }
 
   // Send init request
